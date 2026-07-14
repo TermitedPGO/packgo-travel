@@ -67,12 +67,20 @@ export type DiscoveryEventKind = "message_added" | "label_added_inbox";
 /** What lands at DISCOVERY — no From / subject / body, only provenance. The
  *  classification stage hydrates fromAddress + route downstream (P0-1). eventKind is
  *  RUNTIME-ONLY routing for the state-aware upsert's requeue gate — deliberately NOT
- *  persisted (discoveryReason already records the audit outcome on the row). */
+ *  persisted (discoveryReason already records the audit outcome on the row).
+ *
+ *  eventHistoryId (Codex 16 輪 P0-2) = the per-event history RECORD id that surfaced
+ *  this message (gmail.ts DiscoveredMessage.eventHistoryId). NEVER the page boundary
+ *  nor the mailbox snapshot (those only drive the cursor). It becomes the row's
+ *  gmailHistoryId (first-discovery audit) + lastSeenHistoryId on insert, drives the
+ *  forward-only lastSeen watermark on a duplicate, and — for a label_added_inbox
+ *  event — is the id the strict-greater requeue gate compares against. null for
+ *  query-scan discoveries (fallback / bootstrap / backfill carry no record id). */
 export interface MinimalLedgerRow {
   integrationId: number;
   gmailMessageId: string;
   gmailThreadId: string;
-  gmailHistoryId: string | null;
+  eventHistoryId: string | null;
   source: LedgerSource;
   eventKind: DiscoveryEventKind;
 }
@@ -107,6 +115,16 @@ export interface LedgerRow {
   requeueCount: number;
   /** When the row was last requeued (NULL until the first ignored→pending flip). */
   lastRequeuedAt: Date | null;
+  // ── v4 (Codex 16 輪) ──
+  /** The monotonic requeue watermark: history record id of the last label_added_inbox
+   *  event that TRIGGERED a requeue. The gate fires only for a strictly-greater id. */
+  lastRequeueEventId: string | null;
+  /** Row-claim lease (P0-3). claimToken = the runner currently leasing this row for a
+   *  side-effecting stage; claimExpiresAt = lease expiry; claimStage = 'classify'|'feed'.
+   *  All NULL when free. */
+  claimToken: string | null;
+  claimExpiresAt: Date | null;
+  claimStage: string | null;
 }
 
 export interface IntegrationCursor {
@@ -128,6 +146,10 @@ export interface DiscoveredMessage {
   id: string;
   threadId: string;
   eventKind?: DiscoveryEventKind;
+  /** The per-event history record id that surfaced this message (Codex 16 輪 P0-2).
+   *  Optional at the port boundary; toMinimalRows defaults an absent value to null
+   *  (a scan / untagged adapter carries no record id → never a requeue trigger). */
+  eventHistoryId?: string | null;
 }
 
 /** The raw signals the classification stage needs — hydrated per message. */
@@ -183,18 +205,22 @@ export interface LedgerStore {
    *    • row absent → INSERT pending (fromAddress/route NULL, internalDateMs 0,
    *      discoveryReason 'initial'); lastSeenHistoryId = the discovery historyId.
    *    • row exists, status='ignored' AND the discovery's eventKind =
-   *      'label_added_inbox' → REQUEUE: flip to pending, clear route/wouldRoute
-   *      (re-classify from scratch), reset retry track, bump requeueCount + stamp
-   *      lastRequeuedAt/discoveryReason='inbox_requeue' (audit — the counter records
-   *      the resurrection). eventKind='message_added' NEVER requeues (§四.1): a 404
-   *      fallback scan / crash-replay re-seeing old ignored rows must not resurrect
-   *      them (重排風暴閘門).
-   *    • row exists, status='processed' → ONLY update lastSeenHistoryId; NEVER
+   *      'label_added_inbox' AND its eventHistoryId is STRICTLY GREATER than the row's
+   *      lastRequeueEventId (Codex 16 輪 P0-2 monotonic gate) → REQUEUE: flip to
+   *      pending, clear route/wouldRoute (re-classify from scratch), reset retry track,
+   *      clear any claim, bump requeueCount + stamp lastRequeuedAt + set
+   *      lastRequeueEventId=eventHistoryId + discoveryReason='inbox_requeue'. Replaying
+   *      the SAME (or an older) label event — even after the row cycled back to ignored
+   *      — is NOT strictly greater → no-op (requeueCount can't double-count).
+   *      eventKind='message_added' NEVER requeues (§四.1): a 404 fallback scan /
+   *      crash-replay re-seeing old ignored rows must not resurrect them (重排風暴閘門).
+   *    • row exists, status='processed' → ONLY forward-only lastSeenHistoryId; NEVER
    *      re-generate business side effects (any eventKind).
-   *    • row exists, status='failed'/'pending' → ONLY update lastSeenHistoryId; the
-   *      existing retry/classify track continues untouched (any eventKind).
-   *  Idempotent under duplicate labelAdded / crash-replay (a re-hit on a now-pending
-   *  row matches no ignored branch). Returns count of input rows. Throws on any
+   *    • row exists, status='failed'/'pending' → ONLY forward-only lastSeenHistoryId;
+   *      the existing retry/classify track continues untouched (any eventKind).
+   *  lastSeenHistoryId is FORWARD-ONLY (BigInt-monotonic, never regresses on a
+   *  reordered/older sighting) — not COALESCE-only. Idempotent under duplicate
+   *  labelAdded / crash-replay. Returns the input row count. Throws on any
    *  non-duplicate DB error so the caller must NOT advance the cursor (順序鐵律). */
   insertMinimalIgnore(rows: MinimalLedgerRow[]): Promise<number>;
   /** CAS: UPDATE ... SET lastHistoryId=new WHERE id=? AND lastHistoryId<=>expected.
@@ -207,24 +233,52 @@ export interface LedgerStore {
   ): Promise<boolean>;
   /** Recovery/bootstrap rebaseline (unconditional set under the fencing lock). */
   rebaselineCursor(integrationId: number, newHistoryId: string, syncedAt: Date): Promise<void>;
-  /** Pending rows not yet classified (route IS NULL) whose retry backoff (if any)
-   *  has elapsed (nextRetryAt IS NULL OR <= now). Batch-capped by the impl — this
-   *  cap bounds downstream CLASSIFICATION, never discovery (P0-2). */
-  listUnclassified(integrationId: number, nowMs: number): Promise<LedgerRow[]>;
+  /** ATOMICALLY CLAIM (Codex 16 輪 P0-3) up to a batch of pending, not-yet-classified
+   *  (route IS NULL) rows whose retry backoff has elapsed AND that are free (claimToken
+   *  NULL or claimExpiresAt <= now). Stamps claimToken + claimExpiresAt +
+   *  claimStage='classify' via a CAS UPDATE, returns exactly the rows this token won.
+   *  A concurrent runner with a different token claims a DISJOINT set (already-leased
+   *  rows are excluded), so two classifiers never process the same row. */
+  claimUnclassified(
+    integrationId: number,
+    claimToken: string,
+    leaseExpiresAt: Date,
+    nowMs: number,
+  ): Promise<LedgerRow[]>;
+  /** ATOMICALLY CLAIM classified pending customer/receipt rows + retry-due failed rows
+   *  for the history-mode feeder (claimStage='feed'). Same lease/CAS semantics as
+   *  claimUnclassified — the row claim is the LAST gate before a downstream side effect. */
+  claimActionable(
+    integrationId: number,
+    claimToken: string,
+    leaseExpiresAt: Date,
+    nowMs: number,
+  ): Promise<LedgerRow[]>;
+  /** Renew a still-held lease before a slow step. Returns true iff this token still
+   *  owns the row (extends claimExpiresAt); false = a peer re-took it → the caller must
+   *  NOT proceed to the side effect (失去 lease 的 runner 不得 feed). */
+  renewClaim(ledgerId: number, claimToken: string, leaseExpiresAt: Date): Promise<boolean>;
+  /** Release the lease WITHOUT changing lifecycle state (used when the message
+   *  vanished mid-classify → the row stays pending+unclassified but immediately
+   *  re-claimable). Gated by claimToken (a lost lease is a no-op). */
+  releaseClaim(ledgerId: number, claimToken: string): Promise<boolean>;
   /** A NON-terminal classification failure (hydrate/sniff threw): keep status
    *  pending + route NULL, stamp failureKind/httpStatus/errorDetail + retryCount +
-   *  nextRetryAt (F skeleton backoff). The row is re-classified after the backoff;
-   *  it is NEVER terminal-ized as noise by a sniff error (對抗審查修正 2). */
+   *  nextRetryAt (F skeleton backoff), and RELEASE the claim. The row is re-classified
+   *  after the backoff; it is NEVER terminal-ized as noise by a sniff error (對抗審查
+   *  修正 2). Gated by claimToken — returns false if the lease was lost (write rejected). */
   recordClassifyFailure(
     ledgerId: number,
     cls: { failureKind: FailureKind; httpStatus: number | null; errorDetail: string | null },
     retryCount: number,
     nextRetryAt: Date,
     at: Date,
-  ): Promise<void>;
-  /** Persist a classification decision. status='pending' leaves the row for the
-   *  feeder (history-mode customer/receipt); status='ignored' is terminal (noise/
-   *  self, or a shadow-observed row). Always stamps route + fromAddress + date. */
+    claimToken: string,
+  ): Promise<boolean>;
+  /** Persist a classification decision + RELEASE the claim. status='pending' leaves the
+   *  row for the feeder (history-mode customer/receipt); status='ignored' is terminal
+   *  (noise/self, or a shadow-observed row). Gated by claimToken — a stale/lost lease
+   *  is rejected (returns false), so a peer that re-took the row is never overwritten. */
   classify(
     ledgerId: number,
     fields: {
@@ -235,19 +289,21 @@ export interface LedgerStore {
       classifiedAt: Date;
       status: "pending" | "ignored";
     },
-  ): Promise<void>;
-  /** Classified pending customer/receipt rows + retry-due failed rows for the
-   *  history-mode feeder. Batch-capped by the impl. */
-  listActionable(integrationId: number, nowMs: number): Promise<LedgerRow[]>;
-  markProcessed(ledgerId: number, interactionId: number | null, at: Date): Promise<void>;
-  markIgnored(ledgerId: number, failureKind: FailureKind, at: Date): Promise<void>;
+    claimToken: string,
+  ): Promise<boolean>;
+  /** Terminal writes — ALL gated by claimToken so an expired/stale lease can never
+   *  overwrite a peer (§五: A markProcessed 後 B 的 markFailed 不得覆成 failed). Each
+   *  RELEASES the claim on success. Returns false when the lease was lost (write rejected). */
+  markProcessed(ledgerId: number, interactionId: number | null, at: Date, claimToken: string): Promise<boolean>;
+  markIgnored(ledgerId: number, failureKind: FailureKind, at: Date, claimToken: string): Promise<boolean>;
   markFailed(
     ledgerId: number,
     cls: { failureKind: FailureKind; httpStatus: number | null; errorDetail: string | null },
     retryCount: number,
     nextRetryAt: Date | null,
     at: Date,
-  ): Promise<void>;
+    claimToken: string,
+  ): Promise<boolean>;
   // ── reconciliation (D §4) set-difference queries ──
   existingMessageIds(integrationId: number, gmailMessageIds: string[]): Promise<Set<string>>;
   oldestStuck(
@@ -276,6 +332,27 @@ export interface AlertPort {
   alreadyAlerted(fingerprint: string, windowSeconds: number): Promise<boolean>;
 }
 
+/** Cancellable sleep used by the per-message claim heartbeat. Injectable so tests
+ *  drive heartbeat ticks deterministically; default = real setTimeout (cancel clears
+ *  the timer AND resolves the promise, so a settled message never leaves a dangler). */
+export type CancellableSleep = (ms: number) => { done: Promise<void>; cancel: () => void };
+
+const realSleep: CancellableSleep = (ms) => {
+  let timer: ReturnType<typeof setTimeout>;
+  let wake!: () => void;
+  const done = new Promise<void>((resolve) => {
+    wake = resolve;
+    timer = setTimeout(resolve, ms);
+  });
+  return {
+    done,
+    cancel: () => {
+      clearTimeout(timer);
+      wake();
+    },
+  };
+};
+
 export interface HistorySyncDeps {
   gmail: GmailIntakePort;
   store: LedgerStore;
@@ -286,6 +363,8 @@ export interface HistorySyncDeps {
   clock?: () => number;
   /** per-round page safety valve (P0-2). Default SAFETY_VALVE_PAGES; tests lower it. */
   maxPagesPerRound?: number;
+  /** claim-heartbeat sleep (P0-3 對抗審查修正). Tests inject a manual one. */
+  heartbeatSleep?: CancellableSleep;
 }
 
 // ── tunables ─────────────────────────────────────────────────────────────────
@@ -296,6 +375,13 @@ const RETRY_BASE_MS = 60_000; // 1 min → exponential
 const MAX_RETRIES = 3; // ≥3 → terminal + human card
 const DEAD_LETTER_ALERT_WINDOW_S = 60 * 60; // 60 min re-alert cap
 const SAFETY_VALVE_PAGES = 200; // P0-2 — bound one round; continuation card, resume next round
+// P0-3 row-claim lease. A stage claims its batch for this long; renewed before each
+// slow step. Well under LOCK_TTL so a crash releases the lease promptly for a peer.
+const CLAIM_LEASE_MS = 120_000; // 2 min
+// Heartbeat interval WHILE a single downstream.process is in flight (對抗審查修正):
+// a message slower than CLAIM_LEASE_MS must not silently lose its lease mid-flight,
+// so the lease is re-extended every half-lease until the call settles.
+const CLAIM_HEARTBEAT_MS = CLAIM_LEASE_MS / 2; // 1 min
 
 function lockKeyFor(integrationId: number): string {
   return `gmail:history-lock:${integrationId}`;
@@ -307,6 +393,26 @@ function randomToken(): string {
   } catch {
     return `${Date.now()}-${Math.random().toString(36).slice(2)}`;
   }
+}
+
+/**
+ * P0-3 orchestration fencing gate (Codex 16 輪 §六.3). Given a sync round's result,
+ * may THIS runner proceed to classify + feed? Only when it is the authoritative sync
+ * winner. A runner that lost/never-held the fencing token, lost the cursor CAS to a
+ * concurrent writer, was locked out by a concurrent writer, or whose sync failed
+ * (ok:false) must NOT touch downstream — the winner (or a later round) will. The
+ * row claim is the last gate, but this stops a non-authoritative runner up front.
+ */
+export function syncGrantsDownstream(sync: SyncResult): boolean {
+  if (!sync.ok) return false;
+  if (sync.outcome === "noop") {
+    return (
+      sync.reason !== "lost-fencing-token" &&
+      sync.reason !== "cas-lost-to-concurrent" &&
+      sync.reason !== "locked-by-concurrent-writer"
+    );
+  }
+  return true;
 }
 
 // ── pure helpers (exported for direct unit tests) ────────────────────────────
@@ -398,11 +504,12 @@ export function buildInboxScanQuery(sinceMs: number): string {
 
 /** Map discovered messages → minimal ledger rows (NO eligibility filter — P0-1).
  *  eventKind defaults to "message_added" (fail-safe: absent tag can never requeue);
- *  fetchHistoryPage tags real labelAdded(INBOX) events, scans never do. */
+ *  fetchHistoryPage tags real labelAdded(INBOX) events, scans never do. eventHistoryId
+ *  is PER-MESSAGE (its own history record id; Codex 16 輪 P0-2) — never a page boundary
+ *  or mailbox snapshot; absent (scans) → null (can never trigger a requeue). */
 function toMinimalRows(
   integrationId: number,
   messages: DiscoveredMessage[],
-  gmailHistoryId: string | null,
   source: LedgerSource,
 ): MinimalLedgerRow[] {
   return messages
@@ -411,7 +518,7 @@ function toMinimalRows(
       integrationId,
       gmailMessageId: m.id,
       gmailThreadId: m.threadId || "",
-      gmailHistoryId,
+      eventHistoryId: m.eventHistoryId ?? null,
       source,
       eventKind: m.eventKind ?? "message_added",
     }));
@@ -491,7 +598,7 @@ export async function syncHistoryForIntegration(
       // failure returns the SAME {ok:false, failure} shape as a first-page fetch
       // failure (一致錯誤面) — cursor semantics unchanged: this page did NOT land,
       // so the cursor stays at the last landed prefix and the next round re-lists.
-      const minimal = toMinimalRows(integrationId, page.messages, page.boundaryHistoryId, "history");
+      const minimal = toMinimalRows(integrationId, page.messages, "history");
       if (minimal.length > 0) {
         try {
           await deps.store.insertMinimalIgnore(minimal);
@@ -546,7 +653,6 @@ async function runScanPages(
   deps: HistorySyncDeps,
   integrationId: number,
   query: string,
-  gmailHistoryId: string | null,
   source: LedgerSource,
 ): Promise<{ landed: number; drained: boolean }> {
   const maxPages = deps.maxPagesPerRound ?? SAFETY_VALVE_PAGES;
@@ -555,7 +661,9 @@ async function runScanPages(
   let landed = 0;
   for (;;) {
     const page = await deps.gmail.scanQueryPage(query, pageToken);
-    const minimal = toMinimalRows(integrationId, page.messages, gmailHistoryId, source);
+    // scan discoveries carry eventHistoryId null (a messages.list result has no history
+    // record id) — the mailbox snapshot must never masquerade as a per-event id (P0-2).
+    const minimal = toMinimalRows(integrationId, page.messages, source);
     if (minimal.length > 0) {
       await deps.store.insertMinimalIgnore(minimal);
       landed += minimal.length;
@@ -587,7 +695,7 @@ async function bootstrap(
   // first-page history fetch failure (一致錯誤面); un-bootstrapped cursor stays null.
   let scan: { landed: number; drained: boolean };
   try {
-    scan = await runScanPages(deps, cur.id, buildInboxScanQuery(sinceMs), baseline, "fallback_scan");
+    scan = await runScanPages(deps, cur.id, buildInboxScanQuery(sinceMs), "fallback_scan");
   } catch (e) {
     return { ok: false, reason: "ledger-insert-failed", failure: classifyFailure(e) };
   }
@@ -621,7 +729,7 @@ async function runFallbackRecovery(
   // the cursor stays expired so the next round re-runs fallback.
   let scan: { landed: number; drained: boolean };
   try {
-    scan = await runScanPages(deps, cur.id, buildInboxScanQuery(sinceMs), null, "fallback_scan");
+    scan = await runScanPages(deps, cur.id, buildInboxScanQuery(sinceMs), "fallback_scan");
   } catch (e) {
     return { ok: false, reason: "ledger-insert-failed", failure: classifyFailure(e) };
   }
@@ -666,6 +774,8 @@ export interface ClassifyResult {
   retryScheduled: number;
   /** classification retries exhausted → terminal failed + manual-review card. */
   deadLettered: number;
+  /** P0-3 — a token-gated write was rejected (lease lost to a peer mid-row). */
+  lostLease: number;
 }
 
 /**
@@ -692,9 +802,28 @@ export async function classifyPendingLedger(
     skipped: 0,
     retryScheduled: 0,
     deadLettered: 0,
+    lostLease: 0,
   };
 
-  const rows = await deps.store.listUnclassified(integrationId, now());
+  // P0-3 — atomically CLAIM the candidate batch. A concurrent classifier gets a
+  // disjoint set (already-leased rows excluded), and every terminal write below is
+  // gated by this token, so two classifiers never both decide the same row.
+  //
+  // NO per-row heartbeat here (deliberate, 對抗審查修正 item 4): per-row work is ONE
+  // bounded Gmail metadata GET + a rules-only sniff (hydrateSignals — no LLM call
+  // anywhere in this stage; the LLM lives in the FEED stage's processOneEmail chain,
+  // which does heartbeat). A single hydrate cannot plausibly exceed CLAIM_LEASE_MS
+  // (HTTP client timeouts are far shorter), and even if the lease lapsed:
+  // classification has NO business side effect — the worst case is a wasted duplicate
+  // read, and the token-gated classify/markFailed write of the loser is rejected, so
+  // no state can be corrupted and nothing double-fires.
+  const claimToken = randomToken();
+  const rows = await deps.store.claimUnclassified(
+    integrationId,
+    claimToken,
+    new Date(now() + CLAIM_LEASE_MS),
+    now(),
+  );
   for (const row of rows) {
     // 對抗審查修正 2 — a hydrate/sniff THROW must never terminal-ize a potential
     // receipt as noise. It goes NON-terminal through the F skeleton: retryCount +
@@ -710,30 +839,39 @@ export async function classifyPendingLedger(
       const nextRetryAt = computeNextRetryAt(retryCount, now());
       const errorDetail = errorSummary(e);
       if (nextRetryAt === null) {
-        await deps.store.markFailed(
+        const won = await deps.store.markFailed(
           row.id,
           { failureKind: cls.failureKind, httpStatus: cls.httpStatus, errorDetail },
           retryCount,
           null,
           new Date(now()),
+          claimToken,
         );
+        if (!won) {
+          res.lostLease++;
+          continue;
+        }
         res.deadLettered++;
         await postClassifyManualReviewCard(deps, integrationId, row, cls);
       } else {
-        await deps.store.recordClassifyFailure(
+        const won = await deps.store.recordClassifyFailure(
           row.id,
           { failureKind: cls.failureKind, httpStatus: cls.httpStatus, errorDetail },
           retryCount,
           nextRetryAt,
           new Date(now()),
+          claimToken,
         );
-        res.retryScheduled++;
+        if (!won) res.lostLease++;
+        else res.retryScheduled++;
       }
       continue;
     }
     if (!sig) {
       // vanished/transient — leave pending, retried next round (reconcile rule 2
-      // eventually flags a persistently stuck row for a human).
+      // eventually flags a persistently stuck row for a human). Release the claim so
+      // the row is immediately re-claimable rather than blocked for the lease window.
+      await deps.store.releaseClaim(row.id, claimToken);
       res.skipped++;
       continue;
     }
@@ -741,37 +879,44 @@ export async function classifyPendingLedger(
     const classifiedAt = new Date(now());
     const actionable = route === "customer" || route === "receipt";
 
+    let won: boolean;
     if (!actionable) {
-      await deps.store.classify(row.id, {
-        fromAddress,
-        route,
-        wouldRoute: null,
-        internalDateMs: sig.internalDateMs,
-        classifiedAt,
-        status: "ignored",
-      });
-      res.ignoredTerminal++;
+      won = await deps.store.classify(
+        row.id,
+        { fromAddress, route, wouldRoute: null, internalDateMs: sig.internalDateMs, classifiedAt, status: "ignored" },
+        claimToken,
+      );
+      if (won) res.ignoredTerminal++;
     } else if (shadow) {
-      await deps.store.classify(row.id, {
-        fromAddress,
-        route,
-        wouldRoute: route, // parity record: what history mode WOULD do
-        internalDateMs: sig.internalDateMs,
-        classifiedAt,
-        status: "ignored",
-      });
-      res.ignoredTerminal++;
+      won = await deps.store.classify(
+        row.id,
+        {
+          fromAddress,
+          route,
+          wouldRoute: route, // parity record: what history mode WOULD do
+          internalDateMs: sig.internalDateMs,
+          classifiedAt,
+          status: "ignored",
+        },
+        claimToken,
+      );
+      if (won) res.ignoredTerminal++;
     } else {
-      await deps.store.classify(row.id, {
-        fromAddress,
-        route,
-        wouldRoute: null,
-        internalDateMs: sig.internalDateMs,
-        classifiedAt,
-        status: "pending", // history mode — the feeder processes it
-      });
-      res.deferredToFeeder++;
+      won = await deps.store.classify(
+        row.id,
+        {
+          fromAddress,
+          route,
+          wouldRoute: null,
+          internalDateMs: sig.internalDateMs,
+          classifiedAt,
+          status: "pending", // history mode — the feeder processes it
+        },
+        claimToken,
+      );
+      if (won) res.deferredToFeeder++;
     }
+    if (!won) res.lostLease++;
   }
   return res;
 }
@@ -783,6 +928,9 @@ export interface FeedResult {
   ignored: number;
   failed: number;
   deadLettered: number;
+  /** P0-3 — a claimed row whose lease was lost before/at the terminal write (a peer
+   *  re-took it). The runner does NOT process or overwrite it. */
+  lostLease: number;
 }
 
 /**
@@ -798,36 +946,83 @@ export async function feedPendingDownstream(
 ): Promise<FeedResult> {
   if (!deps.downstream) throw new Error("feedPendingDownstream requires a DownstreamPort");
   const now = () => (deps.clock ? deps.clock() : Date.now());
-  const res: FeedResult = { processed: 0, ignored: 0, failed: 0, deadLettered: 0 };
+  const res: FeedResult = { processed: 0, ignored: 0, failed: 0, deadLettered: 0, lostLease: 0 };
 
-  const rows = await deps.store.listActionable(integrationId, now());
+  // P0-3 — atomically CLAIM the actionable batch. HONEST scope of the guarantee (對抗
+  // 審查修正): the token-gated writes make the LEDGER outcome exactly-once — a peer's
+  // stale write is always rejected, a processed row is never flipped. The downstream
+  // SIDE EFFECT itself is at-least-once: in the extreme window where the claim
+  // heartbeat below fails (renew lost after a peer re-took an expired lease) the same
+  // message can reach downstream.process twice, and dedup then relies on the
+  // downstream external-id idempotency (design §5 既有要求 — processOneEmail /
+  // receipt chain dedup by gmailMessageId/external key).
+  const claimToken = randomToken();
+  const rows = await deps.store.claimActionable(
+    integrationId,
+    claimToken,
+    new Date(now() + CLAIM_LEASE_MS),
+    now(),
+  );
   for (const row of rows) {
+    // Renew the lease right before the slow downstream call (queued rows may have
+    // waited behind earlier slow messages). A failed pre-flight renew = a peer already
+    // re-took THIS row → skip it, keep draining the rest of our batch.
+    if (!(await deps.store.renewClaim(row.id, claimToken, new Date(now() + CLAIM_LEASE_MS)))) {
+      res.lostLease++;
+      continue;
+    }
     // eligibility drift re-check (attack surface 8) applies ONLY to customer rows —
     // a receipt legitimately comes from a noreply sender, so it must NOT be dropped.
     if (row.route === "customer") {
       const verdict = classifyIntakeEligibility(row.fromAddress ?? "");
       if (!verdict.eligible) {
-        await deps.store.markIgnored(row.id, "noise", new Date(now()));
-        res.ignored++;
+        if (await deps.store.markIgnored(row.id, "noise", new Date(now()), claimToken)) res.ignored++;
+        else res.lostLease++;
         continue;
       }
     }
-    try {
-      const { interactionId } = await deps.downstream.process(row);
-      await deps.store.markProcessed(row.id, interactionId, new Date(now()));
-      res.processed++;
-    } catch (e) {
+    // Run the (potentially slow) downstream call under a claim HEARTBEAT: the lease is
+    // re-extended every CLAIM_HEARTBEAT_MS while the call is in flight, so a single
+    // message slower than CLAIM_LEASE_MS keeps its lease (a peer cannot re-claim it).
+    const { outcome, leaseLost } = await processUnderHeartbeat(deps, row, claimToken, now);
+    if (leaseLost) {
+      // A heartbeat renew failed mid-flight: the lease is GONE — a peer may already own
+      // (and be re-processing) this row. Do NOT write back (even a success outcome must
+      // not race the peer's), and STOP this round: this runner's authority is suspect.
+      // The row is re-fed once the peer's lease resolves; the duplicate downstream side
+      // effect in this window is absorbed by the external-id idempotency (design §5).
+      res.lostLease++;
+      break;
+    }
+    if (outcome.ok) {
+      // Terminal write gated by the token — if the lease was lost anyway (renew raced),
+      // the write is REJECTED, so a stale success can't clobber the peer's outcome (§五).
+      if (await deps.store.markProcessed(row.id, outcome.interactionId, new Date(now()), claimToken)) {
+        res.processed++;
+      } else {
+        res.lostLease++;
+      }
+    } else {
+      const e = outcome.error;
       const cls = classifyFailure(e);
       const retryCount = row.retryCount + 1;
       const nextRetryAt = computeNextRetryAt(retryCount, now());
       const errorDetail = errorSummary(e);
-      await deps.store.markFailed(
+      // Token-gated: a runner that hit a UNIQUE-key collision because a PEER already
+      // succeeded no longer holds the lease (the peer's markProcessed cleared it), so
+      // this markFailed is REJECTED — it can NEVER flip the peer's processed→failed (§五).
+      const won = await deps.store.markFailed(
         row.id,
         { failureKind: cls.failureKind, httpStatus: cls.httpStatus, errorDetail },
         retryCount,
         nextRetryAt,
         new Date(now()),
+        claimToken,
       );
+      if (!won) {
+        res.lostLease++;
+        continue;
+      }
       res.failed++;
       if (nextRetryAt === null) {
         res.deadLettered++;
@@ -836,6 +1031,96 @@ export async function feedPendingDownstream(
     }
   }
   return res;
+}
+
+/**
+ * Run downstream.process under a claim heartbeat (對抗審查修正). While the call is in
+ * flight the row's lease is renewed every CLAIM_HEARTBEAT_MS; when it settles the
+ * pending timer is cancelled immediately (no dangler). A failed (or throwing) renew
+ * means the lease is gone — leaseLost=true and the heartbeat stops; the caller must
+ * not write back and must stop the round. The process outcome is always captured
+ * (success or error) so the caller can account for it without re-throwing races.
+ */
+async function processUnderHeartbeat(
+  deps: HistorySyncDeps,
+  row: LedgerRow,
+  claimToken: string,
+  now: () => number,
+): Promise<{
+  outcome: { ok: true; interactionId: number | null } | { ok: false; error: unknown };
+  leaseLost: boolean;
+}> {
+  const sleep = deps.heartbeatSleep ?? realSleep;
+  let settled = false;
+  let leaseLost = false;
+  let pending: ReturnType<CancellableSleep> | null = null;
+
+  const heartbeat = (async () => {
+    for (;;) {
+      pending = sleep(CLAIM_HEARTBEAT_MS);
+      await pending.done;
+      if (settled) return;
+      let renewed = false;
+      try {
+        renewed = await deps.store.renewClaim(row.id, claimToken, new Date(now() + CLAIM_LEASE_MS));
+      } catch {
+        renewed = false; // a renew ERROR is indistinguishable from a lost lease — fail safe
+      }
+      if (!renewed) {
+        leaseLost = true;
+        return;
+      }
+      if (settled) return; // settled while renewing — do not start another timer
+    }
+  })();
+
+  let outcome: { ok: true; interactionId: number | null } | { ok: false; error: unknown };
+  try {
+    const { interactionId } = await deps.downstream!.process(row);
+    outcome = { ok: true, interactionId };
+  } catch (e) {
+    outcome = { ok: false, error: e };
+  }
+  settled = true;
+  // cast: `pending` is assigned inside the heartbeat closure, which TS's control-flow
+  // analysis can't see (it still narrows the variable to its `null` initializer here).
+  (pending as ReturnType<CancellableSleep> | null)?.cancel();
+  await heartbeat; // settles promptly: cancelled sleep resolves → loop sees settled
+  return { outcome, leaseLost };
+}
+
+// ── orchestration composition (pure — the adapter builds deps + calls this) ────
+
+export interface IntakeStagesResult {
+  sync: SyncResult;
+  /** undefined = the fencing gate denied downstream (non-authoritative sync). */
+  classify?: ClassifyResult;
+  /** history mode + granted only. */
+  feed?: FeedResult;
+}
+
+/**
+ * One integration's intake round: sync → (fencing gate) → classify → feed. Pure over
+ * injected ports so the P0-3 orchestration gate is unit-testable with fakes. Only the
+ * authoritative sync winner (syncGrantsDownstream) proceeds to classify/feed; a runner
+ * that lost/never-held the fencing token, lost the cursor CAS, was locked out, or whose
+ * sync failed does NOT touch downstream — the winner (or a later round) handles it. The
+ * DB row claim inside classify/feed is the last gate; this is the first.
+ */
+export async function runIntakeStages(
+  deps: HistorySyncDeps,
+  integrationId: number,
+  mode: IntegrationCursor["intakeMode"],
+): Promise<IntakeStagesResult> {
+  const sync = await syncHistoryForIntegration(deps, integrationId);
+  const result: IntakeStagesResult = { sync };
+  if (syncGrantsDownstream(sync)) {
+    result.classify = await classifyPendingLedger(deps, integrationId);
+    if (mode === "history") {
+      result.feed = await feedPendingDownstream(deps, integrationId);
+    }
+  }
+  return result;
 }
 
 /** Truncated, PII-safe error string for the ledger (no body/attachment leak). */

@@ -30,3 +30,11 @@ WIP:本批為當前唯一高風險施工批(B1.2 已完工待部署,不佔施工
 | 施工 | 完成 2026-07-13 晚(opus):P0-1 cursor 語義證明(實作本為 Codex 形狀一,補官方契約註解+變數來源逐行+大數 fixture+BigInt 前進守衛,全 repo 精度稽核零違規)+P0-2 labelsAdded 狀態感知重排(兩語句 upsert+四稽核欄,§四五條全測) | branch |
 | 指揮親讀攔截 | 重排語句原對整批 ignored 一律重排(404 fallback=重排風暴,違 §四.1),退回加 eventKind 閘門:只有 label_added_inbox 事件可重排;fallback/replay 零重排;+COALESCE 防 NULL 蓋 lastSeen | 本表 |
 | 指揮驗收 | 通過:tsc 0、gmail 14 檔 273 綠、全套 5296 綠、閘門段親讀 | 本表 |
+
+## 切片 1.3(Codex 16 輪:事件冪等+row claim)
+| 階段 | 狀態 | 證據 |
+|------|------|------|
+| 施工 | 完成 2026-07-13 深夜(opus):eventHistoryId 逐事件攜帶(頁界/快照不冒充)、lastSeen forward-only、逐 message 條件式重排 CAS(replay affectedRows=0)、syncGrantsDownstream 判定表、classify/feed 原子 claim(token+lease+續期)、全終態寫回 token-gated、TiDB 取捨(水位方案)說明 | branch |
+| 對抗審查 | PASS(code gate 範圍,直接讀正式 adapter 照 Codex §六.8):token 覆蓋全、§四反例重放過;3 findings:feed 單封超租雙發(指揮裁修=逐封心跳續租+誠實註解+紅綠自證)、真 SQL 語義延 DB gate(design 已明訂)、sync 失敗輪 backlog 由 reconcile 規則2 兜底≤30min | 本表 |
+| 指揮驗收 | 通過:tsc 0、gmail 311 綠、全套 5310 綠、重排 CAS/claim 段親讀 | 本表 |
+| 階梯位置 | local code gate 候選(等 Codex 複核);下一關 Local DB gate=本地 TiDB 獨立批 | — |

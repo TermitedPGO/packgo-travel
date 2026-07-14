@@ -38,6 +38,21 @@
 --   * discoveryReason:'initial'(首次)/'inbox_requeue'(重排)。
 --   * requeueCount / lastRequeuedAt:重排次數與時點(稽核軌跡,不覆蓋原分類歷史)。
 --
+-- v4 就地修訂(2026-07-13, Codex 16 輪兩個開放 P0 —— 同樣尚未套用,故直接改 CREATE):
+--   * P0-2 事件級重排冪等:加 `lastRequeueEventId`(單調重排水位)。重排閘門從「只要
+--     eventKind=label_added_inbox 且 status=ignored」升為「該 label 事件的 history record
+--     id 嚴格大於本列 lastRequeueEventId」——replay 同一(或較舊)事件即使該列已循環回
+--     ignored 也不再重排(requeueCount 不重複累加)。lastSeenHistoryId 的 upsert 由
+--     COALESCE-only 改為 forward-only 單調(見 adapter statement 1),不再被較舊值倒退。
+--     lastRequeueEventId 只在真正重排時寫,statement 1 從不碰它 → 兩語句無讀後寫危害。
+--   * P0-3 orchestration fencing + DB row claim:加 `claimToken`/`claimExpiresAt`/
+--     `claimStage`。classify 與 feed 各自對候選列做原子 CAS claim(帶原狀態 + lease 條件的
+--     UPDATE,affectedRows=1 才是 winner);markProcessed/markFailed/markIgnored/classify
+--     一律帶 claimToken 條件,舊/失效 token 或已被他人完成的列寫回被拒(A 成功後 B 撞唯一鍵
+--     的 markFailed 不得把 processed 覆成 failed)。lease 可續期,crash 後到期才可重取。
+--     per-integration fencing 仍為第一層,row claim 為商業副作用的最後一道門。
+--     idx_ledger_claim(integrationId,status,claimExpiresAt)支撐每輪 claim 掃描。
+--
 -- Migration 風格:照 docs/MIGRATION_PATTERNS.md Rule 1,CREATE TABLE / ADD COLUMN
 -- IF NOT EXISTS(TiDB 原生),不套 PREPARE/IF(0070 事故);Rule 2,語句間用
 -- breakpoint 標記行分隔(標記獨立成行,註解內不得出現字面標記 —— 0112 事故)。
@@ -78,9 +93,14 @@ CREATE TABLE IF NOT EXISTS `gmailIngestionLedger` (
   `discoveryReason` VARCHAR(64) NULL,
   `requeueCount` INT NOT NULL DEFAULT 0,
   `lastRequeuedAt` TIMESTAMP NULL,
+  `lastRequeueEventId` VARCHAR(100) NULL,
+  `claimToken` VARCHAR(64) NULL,
+  `claimExpiresAt` TIMESTAMP NULL,
+  `claimStage` VARCHAR(16) NULL,
   UNIQUE KEY `uq_ledger_integration_msg` (`integrationId`, `gmailMessageId`),
   KEY `idx_ledger_status` (`integrationId`, `status`, `nextRetryAt`),
-  KEY `idx_ledger_thread` (`integrationId`, `gmailThreadId`)
+  KEY `idx_ledger_thread` (`integrationId`, `gmailThreadId`),
+  KEY `idx_ledger_claim` (`integrationId`, `status`, `claimExpiresAt`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 --> statement-breakpoint

@@ -3188,6 +3188,29 @@ export const gmailIngestionLedger = mysqlTable(
     requeueCount: int("requeueCount").default(0).notNull(),
     /** v3 — when the row was last requeued (NULL until the first ignored→pending flip). */
     lastRequeuedAt: timestamp("lastRequeuedAt"),
+    /** v4 (2026-07-13, Codex 16 輪 P0-2 事件級重排冪等) — the MONOTONIC requeue
+     *  watermark: the history record id of the last label_added_inbox EVENT that
+     *  actually triggered a requeue. The requeue gate fires ONLY for an event id
+     *  STRICTLY GREATER than this (BigInt-precise), so replaying the SAME (or an
+     *  older) label event — even after the row cycles back to ignored — is a no-op
+     *  (requeueCount cannot double-count). Distinct from lastSeenHistoryId (which
+     *  statement 1 advances on EVERY sighting): this column is touched ONLY on a
+     *  real requeue, so statement 2 can compare against a value statement 1 never
+     *  overwrote (no read-after-write hazard between the two upsert statements). */
+    lastRequeueEventId: varchar("lastRequeueEventId", { length: 100 }),
+    // ── v4 row-claim lease (Codex 16 輪 P0-3) — the LAST gate for downstream side
+    //    effects. classify + feed each atomically CAS-claim a candidate row
+    //    (claimToken + claimExpiresAt + claimStage) before acting; only the
+    //    affectedRows=1 winner processes it, and every terminal write is gated by
+    //    the same token so a stale/expired lease can never overwrite a peer's row. ──
+    /** v4 — the random token of the runner currently leasing this row (NULL = free).
+     *  A terminal/retry write must carry the matching token or it is rejected. */
+    claimToken: varchar("claimToken", { length: 64 }),
+    /** v4 — lease expiry. A row is re-claimable when claimToken IS NULL OR
+     *  claimExpiresAt <= now (crash → the lease simply lapses, then a peer re-takes). */
+    claimExpiresAt: timestamp("claimExpiresAt"),
+    /** v4 — which stage holds the lease ('classify' | 'feed'), audit + defensive. */
+    claimStage: varchar("claimStage", { length: 16 }),
   },
   (table) => ({
     // message-level idempotency key (same thread → each new message is its own
@@ -3196,6 +3219,8 @@ export const gmailIngestionLedger = mysqlTable(
     // reconciliation + retry sweeps scan by (integration, status).
     statusIdx: index("idx_ledger_status").on(table.integrationId, table.status, table.nextRetryAt),
     threadIdx: index("idx_ledger_thread").on(table.integrationId, table.gmailThreadId),
+    // v4 — the per-round claim scan filters by (integration, status, lease expiry).
+    claimIdx: index("idx_ledger_claim").on(table.integrationId, table.status, table.claimExpiresAt),
   }),
 );
 

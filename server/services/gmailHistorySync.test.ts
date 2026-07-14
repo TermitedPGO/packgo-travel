@@ -19,6 +19,8 @@ import {
   syncHistoryForIntegration,
   classifyPendingLedger,
   feedPendingDownstream,
+  runIntakeStages,
+  syncGrantsDownstream,
   classifyFailure,
   computeNextRetryAt,
   isHistoryIdNewer,
@@ -36,6 +38,7 @@ import {
   type HistorySyncDeps,
   type IntegrationCursor,
   type MinimalLedgerRow,
+  type CancellableSleep,
   type LedgerRow,
   type LedgerStatus,
   type FailureKind,
@@ -45,6 +48,18 @@ import {
 // ── in-memory fakes ──────────────────────────────────────────────────────────
 
 type FakeRow = LedgerRow & { firstSeenMs: number };
+
+/** A row is claimable when unleased, or its lease already lapsed (mirror of the
+ *  adapter's `claimToken IS NULL OR claimExpiresAt <= now`). */
+function leaseFree(r: FakeRow, nowMs: number): boolean {
+  return r.claimToken == null || (r.claimExpiresAt != null && r.claimExpiresAt.getTime() <= nowMs);
+}
+/** Release the lease as part of a terminal/retry write (mirror of CLAIM_CLEAR). */
+function clearClaim(r: FakeRow): void {
+  r.claimToken = null;
+  r.claimExpiresAt = null;
+  r.claimStage = null;
+}
 
 class FakeStore implements LedgerStore {
   integrations = new Map<number, IntegrationCursor>();
@@ -64,10 +79,12 @@ class FakeStore implements LedgerStore {
     return c ? { ...c } : null;
   }
   async insertMinimalIgnore(rows: MinimalLedgerRow[]) {
-    // Mirrors the real two-statement state-aware upsert (Codex 15 輪 P0-2 + §四.1
-    // eventKind gate): absent → INSERT pending; existing + ignored + eventKind=
-    // label_added_inbox → REQUEUE (message_added / scan re-discovery NEVER
-    // requeues); else → only lastSeen refresh (null never clobbers — COALESCE).
+    // Mirrors the real two-statement state-aware upsert (Codex 15 輪 P0-2 + 16 輪
+    // 事件級冪等): absent → INSERT pending; existing + ignored + label_added_inbox +
+    // eventHistoryId STRICTLY GREATER than lastRequeueEventId → REQUEUE
+    // (message_added / scan re-discovery / same-or-older event NEVER requeue); every
+    // branch forward-only-advances lastSeenHistoryId (null never clobbers, older
+    // never regresses).
     let inserted = 0;
     for (const r of rows) {
       const dup = this.rows.find(
@@ -79,7 +96,7 @@ class FakeStore implements LedgerStore {
           integrationId: r.integrationId,
           gmailMessageId: r.gmailMessageId,
           gmailThreadId: r.gmailThreadId,
-          gmailHistoryId: r.gmailHistoryId,
+          gmailHistoryId: r.eventHistoryId,
           internalDateMs: 0,
           fromAddress: null,
           source: r.source,
@@ -91,22 +108,37 @@ class FakeStore implements LedgerStore {
           retryCount: 0,
           nextRetryAt: null,
           interactionId: null,
-          lastSeenHistoryId: r.gmailHistoryId,
+          lastSeenHistoryId: r.eventHistoryId,
           discoveryReason: "initial",
           requeueCount: 0,
           lastRequeuedAt: null,
+          lastRequeueEventId: null,
+          claimToken: null,
+          claimExpiresAt: null,
+          claimStage: null,
           firstSeenMs: this.clock(),
         });
         inserted++;
         continue;
       }
-      // statement 1: every status branch refreshes the latest inbox-arrival id
-      // (COALESCE semantics — a null scan-discovery id never clobbers a real one).
-      dup.lastSeenHistoryId = r.gmailHistoryId ?? dup.lastSeenHistoryId;
-      // statement 2: requeue ONLY terminal-ignored rows AND only for an explicit
-      // label_added_inbox event (§四.1 gate); idempotent — a pending/processed/
-      // failed row, or any message_added re-discovery, is untouched.
-      if (dup.status === "ignored" && r.eventKind === "label_added_inbox") {
+      // statement 1: FORWARD-ONLY lastSeen (BigInt-monotonic via isHistoryIdNewer) —
+      // a null scan-discovery never clobbers, an older/reordered event never regresses.
+      if (
+        r.eventHistoryId != null &&
+        (dup.lastSeenHistoryId == null || isHistoryIdNewer(r.eventHistoryId, dup.lastSeenHistoryId))
+      ) {
+        dup.lastSeenHistoryId = r.eventHistoryId;
+      }
+      // statement 2: requeue ONLY a terminal-ignored row, ONLY for an explicit
+      // label_added_inbox event, ONLY when its id is STRICTLY GREATER than the row's
+      // lastRequeueEventId (monotonic gate). Replaying the same/older event — even after
+      // the row cycled back to ignored — is a no-op → requeueCount can't double-count.
+      if (
+        dup.status === "ignored" &&
+        r.eventKind === "label_added_inbox" &&
+        r.eventHistoryId != null &&
+        (dup.lastRequeueEventId == null || isHistoryIdNewer(r.eventHistoryId, dup.lastRequeueEventId))
+      ) {
         dup.status = "pending";
         dup.route = null;
         dup.wouldRoute = null;
@@ -120,6 +152,10 @@ class FakeStore implements LedgerStore {
         dup.discoveryReason = "inbox_requeue";
         dup.requeueCount += 1;
         dup.lastRequeuedAt = new Date(this.clock());
+        dup.lastRequeueEventId = r.eventHistoryId;
+        dup.claimToken = null;
+        dup.claimExpiresAt = null;
+        dup.claimStage = null;
       }
     }
     return inserted;
@@ -139,34 +175,57 @@ class FakeStore implements LedgerStore {
       c.lastSuccessfulSyncAt = syncedAt;
     }
   }
-  async listUnclassified(id: number, nowMs: number) {
-    return this.rows
+  async claimUnclassified(id: number, claimToken: string, leaseExpiresAt: Date, nowMs: number) {
+    const claimed = this.rows
       .filter(
         (r) =>
           r.integrationId === id &&
           r.status === "pending" &&
           r.route === null &&
           // classify-retry backoff gate (對抗審查修正 2)
-          (r.nextRetryAt == null || r.nextRetryAt.getTime() <= nowMs),
+          (r.nextRetryAt == null || r.nextRetryAt.getTime() <= nowMs) &&
+          leaseFree(r, nowMs),
       )
       .sort((a, b) => a.id - b.id)
-      .slice(0, this.batchCap)
-      .map((r) => ({ ...r }));
+      .slice(0, this.batchCap);
+    for (const r of claimed) {
+      r.claimToken = claimToken;
+      r.claimExpiresAt = leaseExpiresAt;
+      r.claimStage = "classify";
+    }
+    return claimed.map((r) => ({ ...r }));
+  }
+  async renewClaim(ledgerId: number, claimToken: string, leaseExpiresAt: Date) {
+    const r = this.rows.find((x) => x.id === ledgerId && x.claimToken === claimToken);
+    if (!r) return false;
+    r.claimExpiresAt = leaseExpiresAt;
+    return true;
+  }
+  async releaseClaim(ledgerId: number, claimToken: string) {
+    const r = this.rows.find((x) => x.id === ledgerId && x.claimToken === claimToken);
+    if (!r) return false;
+    r.claimToken = null;
+    r.claimExpiresAt = null;
+    r.claimStage = null;
+    return true;
   }
   async recordClassifyFailure(
     ledgerId: number,
     cls: { failureKind: FailureKind; httpStatus: number | null; errorDetail: string | null },
     retryCount: number,
     nextRetryAt: Date,
+    _at: Date,
+    claimToken: string,
   ) {
-    const r = this.rows.find((x) => x.id === ledgerId);
-    if (r) {
-      // NON-terminal: status stays pending, route stays NULL.
-      r.failureKind = cls.failureKind;
-      r.httpStatus = cls.httpStatus;
-      r.retryCount = retryCount;
-      r.nextRetryAt = nextRetryAt;
-    }
+    const r = this.rows.find((x) => x.id === ledgerId && x.claimToken === claimToken);
+    if (!r) return false; // lost lease → rejected
+    // NON-terminal: status stays pending, route stays NULL.
+    r.failureKind = cls.failureKind;
+    r.httpStatus = cls.httpStatus;
+    r.retryCount = retryCount;
+    r.nextRetryAt = nextRetryAt;
+    clearClaim(r);
+    return true;
   }
   async classify(
     ledgerId: number,
@@ -178,18 +237,20 @@ class FakeStore implements LedgerStore {
       classifiedAt: Date;
       status: "pending" | "ignored";
     },
+    claimToken: string,
   ) {
-    const r = this.rows.find((x) => x.id === ledgerId);
-    if (r) {
-      r.fromAddress = fields.fromAddress;
-      r.route = fields.route;
-      r.wouldRoute = fields.wouldRoute;
-      r.internalDateMs = fields.internalDateMs;
-      r.status = fields.status;
-    }
+    const r = this.rows.find((x) => x.id === ledgerId && x.claimToken === claimToken);
+    if (!r) return false; // lost lease → rejected
+    r.fromAddress = fields.fromAddress;
+    r.route = fields.route;
+    r.wouldRoute = fields.wouldRoute;
+    r.internalDateMs = fields.internalDateMs;
+    r.status = fields.status;
+    clearClaim(r);
+    return true;
   }
-  async listActionable(id: number, nowMs: number) {
-    return this.rows
+  async claimActionable(id: number, claimToken: string, leaseExpiresAt: Date, nowMs: number) {
+    const claimed = this.rows
       .filter(
         (r) =>
           r.integrationId === id &&
@@ -197,42 +258,53 @@ class FakeStore implements LedgerStore {
             (r.status === "failed" &&
               r.nextRetryAt != null &&
               r.nextRetryAt.getTime() <= nowMs &&
-              r.retryCount < 3)),
+              r.retryCount < 3)) &&
+          leaseFree(r, nowMs),
       )
       .sort((a, b) => a.id - b.id)
-      .slice(0, this.batchCap)
-      .map((r) => ({ ...r }));
-  }
-  async markProcessed(ledgerId: number, interactionId: number | null) {
-    const r = this.rows.find((x) => x.id === ledgerId);
-    if (r) {
-      r.status = "processed";
-      r.interactionId = interactionId;
-      r.nextRetryAt = null;
+      .slice(0, this.batchCap);
+    for (const r of claimed) {
+      r.claimToken = claimToken;
+      r.claimExpiresAt = leaseExpiresAt;
+      r.claimStage = "feed";
     }
+    return claimed.map((r) => ({ ...r }));
   }
-  async markIgnored(ledgerId: number, failureKind: FailureKind) {
-    const r = this.rows.find((x) => x.id === ledgerId);
-    if (r) {
-      r.status = "ignored";
-      r.failureKind = failureKind;
-      r.nextRetryAt = null;
-    }
+  async markProcessed(ledgerId: number, interactionId: number | null, _at: Date, claimToken: string) {
+    const r = this.rows.find((x) => x.id === ledgerId && x.claimToken === claimToken);
+    if (!r) return false; // lost lease → rejected (stale success can't clobber a peer)
+    r.status = "processed";
+    r.interactionId = interactionId;
+    r.nextRetryAt = null;
+    clearClaim(r);
+    return true;
+  }
+  async markIgnored(ledgerId: number, failureKind: FailureKind, _at: Date, claimToken: string) {
+    const r = this.rows.find((x) => x.id === ledgerId && x.claimToken === claimToken);
+    if (!r) return false;
+    r.status = "ignored";
+    r.failureKind = failureKind;
+    r.nextRetryAt = null;
+    clearClaim(r);
+    return true;
   }
   async markFailed(
     ledgerId: number,
     cls: { failureKind: FailureKind; httpStatus: number | null; errorDetail: string | null },
     retryCount: number,
     nextRetryAt: Date | null,
+    _at: Date,
+    claimToken: string,
   ) {
-    const r = this.rows.find((x) => x.id === ledgerId);
-    if (r) {
-      r.status = "failed";
-      r.failureKind = cls.failureKind;
-      r.httpStatus = cls.httpStatus;
-      r.retryCount = retryCount;
-      r.nextRetryAt = nextRetryAt;
-    }
+    const r = this.rows.find((x) => x.id === ledgerId && x.claimToken === claimToken);
+    if (!r) return false; // §五: a stale-token markFailed can NEVER flip a peer's processed→failed
+    r.status = "failed";
+    r.failureKind = cls.failureKind;
+    r.httpStatus = cls.httpStatus;
+    r.retryCount = retryCount;
+    r.nextRetryAt = nextRetryAt;
+    clearClaim(r);
+    return true;
   }
   async existingMessageIds(id: number, ids: string[]) {
     return new Set(
@@ -355,7 +427,11 @@ class FakeAlerts implements AlertPort {
 class FakeDownstream implements DownstreamPort {
   behavior = new Map<string, { throw?: unknown; interactionId?: number | null }>();
   processed: string[] = [];
+  /** Interleaving hook: awaited INSIDE process (before returning) so a test can drive a
+   *  concurrent runner while THIS row is still leased — proves the claim excludes it. */
+  onProcess: ((id: string) => Promise<void>) | null = null;
   async process(row: LedgerRow) {
+    if (this.onProcess) await this.onProcess(row.gmailMessageId);
     const b = this.behavior.get(row.gmailMessageId);
     if (b?.throw) throw b.throw;
     this.processed.push(row.gmailMessageId);
@@ -376,10 +452,16 @@ function page(
   nextPageToken: string | null,
   extra: Partial<HistoryPage> = {},
 ): HistoryPage {
-  // a bare string = a plain messageAdded discovery (eventKind omitted → the engine
-  // defaults it to "message_added"; only an explicit inboxEvent() can requeue).
+  // a bare string = a plain messageAdded discovery (eventKind → "message_added").
+  // Each message's PER-EVENT id (eventHistoryId, Codex 16 輪) defaults to the page
+  // boundary UNLESS the caller set an explicit one — real fetchHistoryPage sets a
+  // per-record id distinct from the boundary (proven in gmailPush.test.ts); the
+  // event-level tests below pass explicit ids to exercise that distinction, while
+  // legacy tests that don't care keep the boundary as the stand-in event id.
   const msgs: DiscoveredMessage[] = messages.map((m) =>
-    typeof m === "string" ? { id: m, threadId: `t-${m}` } : m,
+    typeof m === "string"
+      ? { id: m, threadId: `t-${m}`, eventKind: "message_added", eventHistoryId: boundaryHistoryId }
+      : { ...m, eventHistoryId: m.eventHistoryId ?? boundaryHistoryId },
   );
   return { messages: msgs, boundaryHistoryId, nextPageToken, ...extra };
 }
@@ -387,9 +469,39 @@ function page(
 /** A labelAdded(INBOX) discovery — the ONE event kind allowed to requeue an ignored
  *  row (Codex 15 輪 §四.1). fetchHistoryPage emits this for real labelAdded(INBOX)
  *  records (and for a message seen in BOTH messagesAdded and labelsAdded — label wins,
- *  unit-tested in gmailPush.test.ts). */
-function inboxEvent(id: string): DiscoveredMessage {
-  return { id, threadId: `t-${id}`, eventKind: "label_added_inbox" };
+ *  unit-tested in gmailPush.test.ts). Optional explicit eventHistoryId = the label
+ *  event's own history record id (Codex 16 輪 P0-2); omitted → page() defaults it to
+ *  the boundary. */
+function inboxEvent(id: string, eventHistoryId?: string): DiscoveredMessage {
+  return {
+    id,
+    threadId: `t-${id}`,
+    eventKind: "label_added_inbox",
+    ...(eventHistoryId !== undefined ? { eventHistoryId } : {}),
+  };
+}
+
+/** Seed a classified pending customer row directly (skip discovery for brevity),
+ *  going through the real claim protocol (claim → token-gated classify). */
+async function seedClassifiedCustomer(store: FakeStore, from = CUSTOMER, id = "m1") {
+  await store.insertMinimalIgnore([
+    { integrationId: 1, gmailMessageId: id, gmailThreadId: `t-${id}`, eventHistoryId: "H2", source: "history", eventKind: "message_added" },
+  ]);
+  const row = store.ledgerFor(1).find((r) => r.gmailMessageId === id)!;
+  const token = `seed-${id}`;
+  await store.claimUnclassified(1, token, new Date(4_102_444_800_000), 1_780_000_050_000);
+  await store.classify(
+    row.id,
+    {
+      fromAddress: from,
+      route: "customer",
+      wouldRoute: null,
+      internalDateMs: 1_780_000_000_000,
+      classifiedAt: new Date(1_780_000_050_000),
+      status: "pending",
+    },
+    token,
+  );
 }
 
 function cursor(overrides: Partial<IntegrationCursor> = {}): IntegrationCursor {
@@ -412,6 +524,7 @@ function makeDeps(
     classifier?: FakeClassifier;
     maxPagesPerRound?: number;
     batchCap?: number;
+    heartbeatSleep?: CancellableSleep;
   } = {},
 ) {
   const clock = overrides.clock ?? (() => 1_780_000_100_000);
@@ -430,8 +543,41 @@ function makeDeps(
     downstream: overrides.downstream,
     clock,
     maxPagesPerRound: overrides.maxPagesPerRound,
+    heartbeatSleep: overrides.heartbeatSleep,
   };
   return { deps, store, gmail, lock, alerts, classifier };
+}
+
+/** Manually-driven CancellableSleep for the claim heartbeat: each tick() fires the
+ *  oldest still-pending heartbeat timer (deterministic — no real time involved). */
+function manualSleep() {
+  const pending: Array<{ resolve: () => void; done: boolean }> = [];
+  const fn: CancellableSleep = () => {
+    const entry = { resolve: () => {}, done: false };
+    const done = new Promise<void>((r) => {
+      entry.resolve = () => {
+        entry.done = true;
+        r();
+      };
+    });
+    pending.push(entry);
+    return { done, cancel: () => entry.resolve() };
+  };
+  const tick = () => {
+    for (;;) {
+      const e = pending.shift();
+      if (!e) return;
+      if (e.done) continue; // already cancelled/fired
+      e.resolve();
+      return;
+    }
+  };
+  return { fn, tick };
+}
+
+/** Flush the task queue so an in-flight heartbeat renew completes deterministically. */
+function macroTick(): Promise<void> {
+  return new Promise((r) => setTimeout(r, 0));
 }
 
 // ── P0-1: ledger 先於分類 (discovery lands EVERYTHING, classify assigns route) ──
@@ -1075,22 +1221,6 @@ describe("三宇宙一致: what counts as 'mail that must land' is identical acr
 // ── downstream feeder + F skeleton ────────────────────────────────────────────
 
 describe("feedPendingDownstream — history mode terminal states + F skeleton", () => {
-  /** seed a classified pending customer row directly (skip discovery for brevity). */
-  async function seedClassifiedCustomer(store: FakeStore, from = CUSTOMER, id = "m1") {
-    await store.insertMinimalIgnore([
-      { integrationId: 1, gmailMessageId: id, gmailThreadId: `t-${id}`, gmailHistoryId: "H2", source: "history", eventKind: "message_added" },
-    ]);
-    const row = store.ledgerFor(1).find((r) => r.gmailMessageId === id)!;
-    await store.classify(row.id, {
-      fromAddress: from,
-      route: "customer",
-      wouldRoute: null,
-      internalDateMs: 1_780_000_000_000,
-      classifiedAt: new Date(1_780_000_050_000),
-      status: "pending",
-    });
-  }
-
   it("pending customer → processed (+interactionId); a processed row is never re-fed", async () => {
     const downstream = new FakeDownstream();
     downstream.behavior.set("m1", { interactionId: 4242 });
@@ -1405,6 +1535,355 @@ describe("state-aware requeue: an inbox re-entry re-surfaces the right rows (P0-
     const c = await classifyPendingLedger(deps, 1);
     expect(c.deferredToFeeder).toBe(1); // re-routed exactly once
     expect(store.ledgerFor(1)[0]).toMatchObject({ route: "customer", requeueCount: 1 });
+  });
+});
+
+// ── Codex 16 輪 P0-2: event-level requeue idempotency (§六.4-5) ───────────────────
+describe("event-level requeue idempotency (Codex 16 輪 P0-2, §六.4-5)", () => {
+  // history record ids all > 2^53 (9007199254740992) so a Number() collapse would be
+  // visible — BigInt ordering is load-bearing (the requeue gate + forward-only lastSeen
+  // both compare via isHistoryIdNewer).
+  const E_LO = "9007199254740993";
+  const E_HI = "9007199254740999";
+
+  function msgAdded(id: string, eventHistoryId: string): DiscoveredMessage {
+    return { id, threadId: `t-${id}`, eventKind: "message_added", eventHistoryId };
+  }
+
+  it("§六.4 requeue → re-ignored in the SAME run → replay of the SAME label event does NOT re-requeue (requeueCount stays 1)", async () => {
+    const classifier = new FakeClassifier();
+    classifier.set("m1", { from: CUSTOMER, isReceipt: false, internalDateMs: 1_780_000_000_000 });
+    // shadow mode: a customer/receipt classification is TERMINAL ignored (wouldRoute
+    // recorded, NO side effect) — so the row cycles back to ignored, the exact state
+    // transition the old crash test (§四) avoided by leaving the row pending.
+    const { deps, store, gmail } = makeDeps({ integrations: [cursor({ intakeMode: "shadow" })], classifier });
+
+    // discover m1 (message_added, its OWN event id E_LO) → classify → terminal ignored.
+    gmail.historyPages.push(page([msgAdded("m1", E_LO)], "b1", null));
+    await syncHistoryForIntegration(deps, 1);
+    await classifyPendingLedger(deps, 1);
+    expect(store.ledgerFor(1)[0]).toMatchObject({ status: "ignored", requeueCount: 0, lastRequeueEventId: null });
+
+    // a labelAdded(INBOX) event (record id E_HI) requeues the ignored row exactly once
+    // and stamps the monotonic watermark lastRequeueEventId=E_HI.
+    gmail.historyPages.push(page([inboxEvent("m1", E_HI)], "b2", null));
+    await syncHistoryForIntegration(deps, 1);
+    expect(store.ledgerFor(1)[0]).toMatchObject({
+      status: "pending",
+      route: null,
+      requeueCount: 1,
+      lastRequeueEventId: E_HI,
+    });
+
+    // SAME run re-classifies (shadow) → the row returns to terminal ignored.
+    await classifyPendingLedger(deps, 1);
+    expect(store.ledgerFor(1)[0]).toMatchObject({ status: "ignored", requeueCount: 1 });
+
+    // replay: the cursor never advanced past the label window, so the NEXT round re-sees
+    // the SAME labelAdded(INBOX) event (same record id E_HI). The monotonic gate (event
+    // id must be STRICTLY GREATER than lastRequeueEventId=E_HI) makes it a no-op — the
+    // OLD code (eventKind+ignored gate only) would requeue again → requeueCount 2.
+    gmail.historyPages.push(page([inboxEvent("m1", E_HI)], "b2", null));
+    await syncHistoryForIntegration(deps, 1);
+
+    expect(store.ledgerFor(1)[0].requeueCount).toBe(1); // NOT 2 — replay never double-counts
+    expect(store.ledgerFor(1)[0].status).toBe("ignored");
+    expect(store.ledgerFor(1)).toHaveLength(1);
+  });
+
+  it("§六.5 an OLDER label event arriving out of order does NOT requeue and does NOT regress lastSeen", async () => {
+    const classifier = new FakeClassifier();
+    classifier.set("m1", { from: CUSTOMER, isReceipt: false, internalDateMs: 1_780_000_000_000 });
+    const { deps, store, gmail } = makeDeps({ integrations: [cursor({ intakeMode: "shadow" })], classifier });
+
+    // m1 ignored → requeued by E_HI → re-ignored (shadow). watermark E_HI, lastSeen E_HI.
+    gmail.historyPages.push(page([msgAdded("m1", E_LO)], "b1", null));
+    await syncHistoryForIntegration(deps, 1);
+    await classifyPendingLedger(deps, 1);
+    gmail.historyPages.push(page([inboxEvent("m1", E_HI)], "b2", null));
+    await syncHistoryForIntegration(deps, 1);
+    await classifyPendingLedger(deps, 1);
+    expect(store.ledgerFor(1)[0]).toMatchObject({
+      status: "ignored",
+      requeueCount: 1,
+      lastRequeueEventId: E_HI,
+      lastSeenHistoryId: E_HI,
+    });
+
+    // an OLDER labelAdded(INBOX) event (E_LO < E_HI) arrives out of order (reordered
+    // delivery / replay). NOT strictly greater → no requeue; forward-only lastSeen does
+    // NOT regress to E_LO.
+    gmail.historyPages.push(page([inboxEvent("m1", E_LO)], "b3", null));
+    await syncHistoryForIntegration(deps, 1);
+
+    expect(store.ledgerFor(1)[0]).toMatchObject({
+      status: "ignored",
+      requeueCount: 1, // unchanged
+      lastSeenHistoryId: E_HI, // NOT regressed
+    });
+  });
+
+  it("§六.5 lastSeenHistoryId is forward-only: a reordered older / null sighting keeps the higher watermark", async () => {
+    const { store } = makeDeps();
+    const row = (eventHistoryId: string | null, source: MinimalLedgerRow["source"] = "history"): MinimalLedgerRow => ({
+      integrationId: 1,
+      gmailMessageId: "m1",
+      gmailThreadId: "t",
+      eventHistoryId,
+      source,
+      eventKind: "message_added",
+    });
+    await store.insertMinimalIgnore([row(E_HI)]);
+    expect(store.ledgerFor(1)[0].lastSeenHistoryId).toBe(E_HI);
+    await store.insertMinimalIgnore([row(E_LO)]); // older → must NOT regress
+    expect(store.ledgerFor(1)[0].lastSeenHistoryId).toBe(E_HI);
+    await store.insertMinimalIgnore([row(null, "fallback_scan")]); // scan null → must NOT clobber
+    expect(store.ledgerFor(1)[0].lastSeenHistoryId).toBe(E_HI);
+  });
+});
+
+// ── Codex 16 輪 P0-3: orchestration fencing gate (§六.3/§六.6) ────────────────────
+describe("P0-3 orchestration fencing gate (runIntakeStages, Codex 16 輪 §六.3/§六.6)", () => {
+  it("predicate: only the authoritative sync winner is granted classify/feed", () => {
+    expect(syncGrantsDownstream({ ok: true, outcome: "advanced", landed: 1, cursor: "H2" })).toBe(true);
+    expect(syncGrantsDownstream({ ok: true, outcome: "recovered", landed: 0, cursor: "H2" })).toBe(true);
+    expect(syncGrantsDownstream({ ok: true, outcome: "bootstrapped", landed: 0, cursor: "H2" })).toBe(true);
+    expect(
+      syncGrantsDownstream({ ok: true, outcome: "continued", landed: 1, phase: "history", cursor: "H2" }),
+    ).toBe(true);
+    expect(syncGrantsDownstream({ ok: true, outcome: "noop", reason: "no-history-advance", landed: 0 })).toBe(true);
+    // non-authoritative → blocked
+    expect(syncGrantsDownstream({ ok: true, outcome: "noop", reason: "lost-fencing-token", landed: 0 })).toBe(false);
+    expect(syncGrantsDownstream({ ok: true, outcome: "noop", reason: "cas-lost-to-concurrent", landed: 0 })).toBe(false);
+    expect(syncGrantsDownstream({ ok: true, outcome: "noop", reason: "locked-by-concurrent-writer" })).toBe(false);
+    expect(syncGrantsDownstream({ ok: false, reason: "history-list-failed" })).toBe(false);
+  });
+
+  it("a runner that loses the fencing token mid-sync is DENIED classify+feed (m1 never fed)", async () => {
+    const downstream = new FakeDownstream();
+    const { deps, store, gmail, lock } = makeDeps({
+      integrations: [cursor({ intakeMode: "history" })],
+      downstream,
+    });
+    await seedClassifiedCustomer(store); // m1 classified pending customer, ready to feed
+
+    // a sync round that lands a page but loses the fencing token right before the CAS.
+    gmail.historyPages.push(page(["m2"], "H2", null));
+    lock.failVerify = true;
+    const out = await runIntakeStages(deps, 1, "history");
+
+    expect(out.sync).toMatchObject({ ok: true, outcome: "noop", reason: "lost-fencing-token" });
+    expect(out.classify).toBeUndefined(); // gate denied
+    expect(out.feed).toBeUndefined();
+    expect(downstream.processed).toEqual([]); // m1 was NOT fed
+    expect(store.ledgerFor(1).find((r) => r.gmailMessageId === "m1")).toMatchObject({ status: "pending" });
+  });
+
+  it("a locked-out runner (a concurrent writer holds the fencing lock) is DENIED classify+feed", async () => {
+    const downstream = new FakeDownstream();
+    const { deps, store, lock } = makeDeps({ integrations: [cursor({ intakeMode: "history" })], downstream });
+    await seedClassifiedCustomer(store);
+    lock.refuseAcquire = true; // a concurrent writer already holds the fencing lock
+    const out = await runIntakeStages(deps, 1, "history");
+    expect(out.sync).toMatchObject({ outcome: "noop", reason: "locked-by-concurrent-writer" });
+    expect(out.classify).toBeUndefined();
+    expect(out.feed).toBeUndefined();
+    expect(downstream.processed).toEqual([]);
+  });
+
+  it("the authoritative winner DOES classify+feed (positive control — m1 fed exactly once)", async () => {
+    const downstream = new FakeDownstream();
+    const { deps, store, gmail } = makeDeps({ integrations: [cursor({ intakeMode: "history" })], downstream });
+    await seedClassifiedCustomer(store);
+    gmail.historyPages.push(page([], "H1", null)); // authoritative round, no new mail
+    const out = await runIntakeStages(deps, 1, "history");
+    expect(out.classify).toBeDefined();
+    expect(out.feed).toBeDefined();
+    expect(downstream.processed).toEqual(["m1"]);
+    expect(store.ledgerFor(1)[0]).toMatchObject({ status: "processed" });
+  });
+});
+
+// ── Codex 16 輪 P0-3: DB row claim (§六.6-7) ──────────────────────────────────────
+describe("P0-3 row claim: concurrent runners never double-process (Codex 16 輪 §六.6-7)", () => {
+  const EVENT = "9007199254740993";
+  function seedUnclassified(store: FakeStore, id = "m1"): Promise<number> {
+    return store.insertMinimalIgnore([
+      { integrationId: 1, gmailMessageId: id, gmailThreadId: `t-${id}`, eventHistoryId: EVENT, source: "history", eventKind: "message_added" },
+    ]);
+  }
+
+  it("§六.6 two interleaved feeders → downstream.process runs EXACTLY once for the same message", async () => {
+    const downstream = new FakeDownstream();
+    const { deps, store } = makeDeps({ integrations: [cursor({ intakeMode: "history" })], downstream });
+    await seedClassifiedCustomer(store); // m1 pending customer
+
+    // While runner A is mid-process on m1 (m1 leased by A), runner B tries to feed. B's
+    // claimActionable finds m1 already leased → B claims a DISJOINT (empty) set → B never
+    // processes. downstream.process therefore fires exactly once (A only).
+    let bResult: Awaited<ReturnType<typeof feedPendingDownstream>> | null = null;
+    downstream.onProcess = async (id) => {
+      if (id === "m1" && bResult === null) {
+        bResult = await feedPendingDownstream(deps, 1);
+      }
+    };
+    const aResult = await feedPendingDownstream(deps, 1);
+
+    expect(downstream.processed).toEqual(["m1"]); // EXACTLY once
+    expect(aResult.processed).toBe(1);
+    expect(bResult!.processed).toBe(0); // B was handed nothing
+    expect(store.ledgerFor(1)[0]).toMatchObject({ status: "processed" });
+  });
+
+  it("§五 corruption guard: a stale-token markFailed can NOT flip a peer's processed row → failed", async () => {
+    const { store } = makeDeps({ integrations: [cursor({ intakeMode: "history" })] });
+    await seedClassifiedCustomer(store);
+    const rowId = store.ledgerFor(1)[0].id;
+    const nowMs = 1_780_000_100_000;
+    // Runner A claims + processes m1 → processed (lease released).
+    const claimedA = await store.claimActionable(1, "A", new Date(nowMs + 120_000), nowMs);
+    expect(claimedA).toHaveLength(1);
+    expect(await store.markProcessed(rowId, 7777, new Date(nowMs), "A")).toBe(true);
+    expect(store.ledgerFor(1)[0]).toMatchObject({ status: "processed", claimToken: null });
+    // Runner B, holding a stale token, hits a downstream UNIQUE-key collision and calls
+    // markFailed — the row no longer holds B's token → REJECTED, stays processed.
+    const won = await store.markFailed(
+      rowId,
+      { failureKind: "db", httpStatus: null, errorDetail: "dup" },
+      1,
+      new Date(nowMs + 60_000),
+      new Date(nowMs),
+      "B",
+    );
+    expect(won).toBe(false);
+    expect(store.ledgerFor(1)[0]).toMatchObject({ status: "processed" }); // NOT failed
+  });
+
+  it("§六.7 claim expiry → a peer re-claims only AFTER the lease lapses", async () => {
+    const { store } = makeDeps();
+    await seedUnclassified(store);
+    const t0 = 1_780_000_100_000;
+    const a = await store.claimUnclassified(1, "A", new Date(t0 + 120_000), t0);
+    expect(a).toHaveLength(1);
+    // before expiry, B cannot claim it.
+    expect(await store.claimUnclassified(1, "B", new Date(t0 + 240_000), t0 + 60_000)).toHaveLength(0);
+    // after expiry, B re-claims it.
+    const bLate = await store.claimUnclassified(1, "B", new Date(t0 + 360_000), t0 + 121_000);
+    expect(bLate).toHaveLength(1);
+    expect(store.ledgerFor(1)[0].claimToken).toBe("B");
+  });
+
+  it("§六.7 two classifiers competing for the same row → only one wins", async () => {
+    const { store } = makeDeps();
+    await seedUnclassified(store);
+    const t0 = 1_780_000_100_000;
+    const a = await store.claimUnclassified(1, "A", new Date(t0 + 120_000), t0);
+    const b = await store.claimUnclassified(1, "B", new Date(t0 + 120_000), t0); // same instant
+    expect(a).toHaveLength(1);
+    expect(b).toHaveLength(0); // B loses — already leased by A
+    expect(store.ledgerFor(1)[0].claimToken).toBe("A");
+  });
+
+  it("§六.7 a stale-token classify write is rejected (lost lease → no state change)", async () => {
+    const { store } = makeDeps();
+    await seedUnclassified(store);
+    const rowId = store.ledgerFor(1)[0].id;
+    const t0 = 1_780_000_100_000;
+    await store.claimUnclassified(1, "A", new Date(t0 + 120_000), t0); // A holds the lease
+    const won = await store.classify(
+      rowId,
+      { fromAddress: CUSTOMER, route: "customer", wouldRoute: null, internalDateMs: 1, classifiedAt: new Date(t0), status: "pending" },
+      "STALE",
+    );
+    expect(won).toBe(false);
+    expect(store.ledgerFor(1)[0]).toMatchObject({ route: null, status: "pending" }); // untouched
+  });
+});
+
+// ── Codex 16 輪對抗審查修正: per-message claim heartbeat during feed ──────────────
+describe("P0-3 claim heartbeat: a single slow downstream message keeps its lease (對抗審查修正)", () => {
+  it("heartbeat renews mid-process: a message slower than the lease is NOT re-claimable by a peer (contrast: §六.7 expiry test)", async () => {
+    let tNow = 1_780_000_100_000;
+    const sleeps = manualSleep();
+    const downstream = new FakeDownstream();
+    const { deps, store } = makeDeps({
+      integrations: [cursor({ intakeMode: "history" })],
+      downstream,
+      clock: () => tNow,
+      heartbeatSleep: sleeps.fn,
+    });
+    await seedClassifiedCustomer(store);
+
+    let peer: Awaited<ReturnType<typeof feedPendingDownstream>> | null = null;
+    let acted = false;
+    downstream.onProcess = async (id) => {
+      if (id !== "m1" || acted) return;
+      acted = true;
+      // the single message is SLOW: real time crosses the ORIGINAL lease expiry…
+      tNow += 130_000; // > CLAIM_LEASE_MS (120s)
+      // …but a heartbeat tick fires and renews the lease before any peer looks:
+      sleeps.tick();
+      await macroTick(); // let the renew land
+      // a peer feeding NOW must find the row still leased (renewed) → gets nothing.
+      // WITHOUT the heartbeat the lease would have lapsed at +120s and the peer would
+      // re-claim + re-process (the §六.7 expiry test shows exactly that takeover).
+      peer = await feedPendingDownstream(deps, 1);
+    };
+
+    const res = await feedPendingDownstream(deps, 1);
+
+    expect(peer!.processed).toBe(0); // peer was handed NOTHING mid-flight
+    expect(peer!.lostLease).toBe(0);
+    expect(downstream.processed).toEqual(["m1"]); // downstream fired exactly once
+    expect(res).toMatchObject({ processed: 1, lostLease: 0 }); // winner completed + wrote back
+    expect(store.ledgerFor(1)[0]).toMatchObject({ status: "processed", claimToken: null });
+  });
+
+  it("heartbeat renew FAILURE mid-process → no write-back for that message, the round STOPS, the row is re-fed after the lease lapses", async () => {
+    let tNow = 1_780_000_100_000;
+    const sleeps = manualSleep();
+    const downstream = new FakeDownstream();
+    const { deps, store } = makeDeps({
+      integrations: [cursor({ intakeMode: "history" })],
+      downstream,
+      clock: () => tNow,
+      heartbeatSleep: sleeps.fn,
+    });
+    await seedClassifiedCustomer(store, CUSTOMER, "m1");
+    await seedClassifiedCustomer(store, CUSTOMER, "m2"); // second row proves the round stops
+
+    let acted = false;
+    downstream.onProcess = async (id) => {
+      if (id !== "m1" || acted) return;
+      acted = true;
+      // a PEER takes over the row mid-flight (models: our lease lapsed + peer re-claimed).
+      const r = store.rows.find((x) => x.gmailMessageId === "m1")!;
+      r.claimToken = "PEER";
+      r.claimExpiresAt = new Date(tNow + 120_000);
+      r.claimStage = "feed";
+      // next heartbeat tick: renew carries OUR token → mismatch → lost lease.
+      sleeps.tick();
+      await macroTick();
+    };
+
+    const res = await feedPendingDownstream(deps, 1);
+
+    // m1's downstream DID run (the honest at-least-once window), but the ledger write-
+    // back was aborted and the whole round stopped: m2 was never touched by this runner.
+    expect(downstream.processed).toEqual(["m1"]);
+    expect(res).toMatchObject({ processed: 0, failed: 0, lostLease: 1 });
+    const byId = Object.fromEntries(store.ledgerFor(1).map((r) => [r.gmailMessageId, r]));
+    expect(byId.m1).toMatchObject({ status: "pending", claimToken: "PEER" }); // OUR write rejected/aborted
+    expect(byId.m2).toMatchObject({ status: "pending" }); // round stopped before m2
+
+    // after ALL leases lapse, a fresh runner picks BOTH rows up (at-least-once recovery;
+    // m1's duplicate downstream call is absorbed by external-id idempotency, design §5).
+    downstream.onProcess = null;
+    tNow += 300_000;
+    const res2 = await feedPendingDownstream(deps, 1);
+    expect(res2.processed).toBe(2);
+    expect(downstream.processed).toEqual(["m1", "m1", "m2"]); // the documented duplicate
+    expect(store.ledgerFor(1).every((r) => r.status === "processed")).toBe(true);
   });
 });
 

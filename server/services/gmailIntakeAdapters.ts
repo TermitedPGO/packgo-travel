@@ -28,6 +28,7 @@ import {
   syncHistoryForIntegration,
   classifyPendingLedger,
   feedPendingDownstream,
+  runIntakeStages,
   type GmailIntakePort,
   type ClassifierPort,
   type LockPort,
@@ -155,6 +156,16 @@ const LEDGER_MAX_RETRIES = 3;
 const LEDGER_CLASSIFY_BATCH = 100;
 const LEDGER_FEED_BATCH = 100;
 
+// P0-3 — releasing the lease is part of EVERY terminal/retry write, so the row is
+// immediately re-claimable and never holds a stale token.
+const CLAIM_CLEAR = { claimToken: null, claimExpiresAt: null, claimStage: null } as const;
+
+/** mysql2 (via drizzle) returns [ResultSetHeader, fields] for an UPDATE — pull
+ *  affectedRows so a CAS/token-gated write can report whether it actually landed. */
+function affectedRows(res: unknown): number {
+  return (res as any)?.[0]?.affectedRows ?? 0;
+}
+
 export function createDrizzleLedgerStore(
   db: NonNullable<Awaited<ReturnType<typeof getDb>>>,
 ): LedgerStore {
@@ -170,18 +181,22 @@ export function createDrizzleLedgerStore(
 
     async insertMinimalIgnore(rows) {
       if (rows.length === 0) return 0;
-      // State-aware upsert (Codex 15 輪 P0-2), done as TWO ordering-hazard-free
-      // statements under the per-integration fencing lock (the sole writer, so no
-      // concurrent-upsert race). Both are idempotent → duplicate labelAdded / crash-
-      // replay converge with zero duplication.
+      // State-aware upsert (Codex 15 輪 P0-2 + 16 輪事件級冪等), done as TWO
+      // ordering-hazard-free statements under the per-integration fencing lock (the
+      // sole writer, so no concurrent-upsert race). Both idempotent → duplicate
+      // labelAdded / crash-replay converge with ZERO duplication.
       //
-      // Statement 1 — idempotent INSERT + ALWAYS track the latest inbox-arrival
-      // historyId (every eventKind / every status branch). Minimal discovery row
-      // (P0-1): fromAddress/route/classifiedAt stay NULL, internalDateMs 0 until the
-      // classification stage hydrates them. On a duplicate key we only refresh
-      // lastSeenHistoryId — COALESCE'd so a fallback-scan re-discovery (which carries
-      // gmailHistoryId=NULL) never clobbers a real value; the requeue itself is
-      // statement 2 so no SET clause here references `status`.
+      // Statement 1 — idempotent INSERT + FORWARD-ONLY track of the latest inbox-arrival
+      // historyId (every eventKind / every status branch). Minimal discovery row (P0-1):
+      // fromAddress/route/classifiedAt stay NULL, internalDateMs 0 until classification
+      // hydrates them. gmailHistoryId + lastSeenHistoryId land the PER-EVENT history
+      // record id (eventHistoryId; Codex 16 輪) — never a page boundary / mailbox
+      // snapshot. On a duplicate we advance lastSeenHistoryId ONLY when the incoming
+      // event id is strictly greater (BigInt-precise CAST UNSIGNED), NULL-safe both ways
+      // (a scan re-discovery carries NULL → never clobbers; a reordered/older event →
+      // never regresses). Statement 1 NEVER touches lastRequeueEventId, so statement 2's
+      // requeue gate reads a watermark statement 1 didn't overwrite (no read-after-write
+      // hazard between the two). No SET clause references `status` (requeue is stmt 2).
       await db
         .insert(gmailIngestionLedger)
         .values(
@@ -189,8 +204,8 @@ export function createDrizzleLedgerStore(
             integrationId: r.integrationId,
             gmailMessageId: r.gmailMessageId,
             gmailThreadId: r.gmailThreadId,
-            gmailHistoryId: r.gmailHistoryId,
-            lastSeenHistoryId: r.gmailHistoryId,
+            gmailHistoryId: r.eventHistoryId,
+            lastSeenHistoryId: r.eventHistoryId,
             discoveryReason: "initial" as const,
             internalDateMs: 0,
             source: r.source,
@@ -199,61 +214,76 @@ export function createDrizzleLedgerStore(
         )
         .onDuplicateKeyUpdate({
           set: {
-            lastSeenHistoryId: sql`coalesce(values(\`lastSeenHistoryId\`), \`lastSeenHistoryId\`)`,
+            lastSeenHistoryId: sql`case when values(\`lastSeenHistoryId\`) is null then \`lastSeenHistoryId\` when \`lastSeenHistoryId\` is null then values(\`lastSeenHistoryId\`) when cast(values(\`lastSeenHistoryId\`) as unsigned) > cast(\`lastSeenHistoryId\` as unsigned) then values(\`lastSeenHistoryId\`) else \`lastSeenHistoryId\` end`,
           },
         });
 
-      // Statement 2 — REQUEUE gate (Codex 15 輪 §四.1 修正): ONLY discoveries whose
-      // eventKind is 'label_added_inbox' (an explicit labelAdded event carrying INBOX)
-      // may resurrect a terminal-ignored row. messagesAdded replays and fallback/
-      // bootstrap/backfill scans are 'message_added' → they never reach this statement,
-      // so a 404 full-inbox re-scan cannot mass-requeue historical noise (重排風暴閘門).
-      // For the gated ids: flip ignored→pending, clear the classification (route/
-      // wouldRoute → re-classify from scratch), reset the retry/classify track, and
-      // stamp the audit trail. The `WHERE status='ignored'` gate makes this a no-op
-      // for processed/failed/pending rows (§四 3/4) and idempotent on replay (a re-hit
-      // finds status='pending'). No SET column references `status`, so there is NO
-      // ODKU-style assignment-order hazard — every RHS reads the pre-update row.
-      const requeueIds = rows
-        .filter((r) => r.eventKind === "label_added_inbox")
-        .map((r) => r.gmailMessageId);
-      if (requeueIds.length === 0) return rows.length;
+      // Statement 2 — REQUEUE gate (Codex 15 輪 §四.1 + 16 輪事件級冪等). ONLY a
+      // discovery whose eventKind is 'label_added_inbox' (an explicit labelAdded event
+      // carrying INBOX) AND whose per-event id is STRICTLY GREATER than the row's
+      // lastRequeueEventId may resurrect a terminal-ignored row. messagesAdded replays
+      // and fallback/bootstrap/backfill scans are 'message_added' → never reach here
+      // (重排風暴閘門). Each candidate carries its OWN eventHistoryId, so this is a
+      // per-message conditional CAS UPDATE (mirrors advanceCursorCAS): the strict-greater
+      // guard makes replaying the SAME (or an older) label event — even after the row
+      // cycled back to ignored — a no-op (affectedRows=0), so requeueCount can NEVER
+      // double-count. On a real requeue: flip ignored→pending, clear the classification,
+      // reset retry/claim track, bump requeueCount + set lastRequeueEventId=eventHistoryId
+      // + stamp the audit trail. `WHERE status='ignored'` keeps processed/failed/pending
+      // a no-op (§四 3/4). No SET column references `status`, so no ODKU assignment-order hazard.
+      const requeueCandidates = rows.filter(
+        (r) => r.eventKind === "label_added_inbox" && r.eventHistoryId !== null,
+      );
+      if (requeueCandidates.length === 0) return rows.length;
       const integrationId = rows[0]!.integrationId;
-      await db
-        .update(gmailIngestionLedger)
-        .set({
-          status: "pending",
-          route: null,
-          wouldRoute: null,
-          classifiedAt: null,
-          fromAddress: null,
-          internalDateMs: 0,
-          failureKind: null,
-          errorDetail: null,
-          httpStatus: null,
-          retryCount: 0,
-          nextRetryAt: null,
-          processedAt: null,
-          interactionId: null,
-          discoveryReason: "inbox_requeue",
-          lastRequeuedAt: new Date(),
-          requeueCount: sql`${gmailIngestionLedger.requeueCount} + 1`,
-        })
-        .where(
-          and(
-            eq(gmailIngestionLedger.integrationId, integrationId),
-            inArray(gmailIngestionLedger.gmailMessageId, requeueIds),
-            eq(gmailIngestionLedger.status, "ignored"),
-          ),
-        );
+      for (const r of requeueCandidates) {
+        await db
+          .update(gmailIngestionLedger)
+          .set({
+            status: "pending",
+            route: null,
+            wouldRoute: null,
+            classifiedAt: null,
+            fromAddress: null,
+            internalDateMs: 0,
+            failureKind: null,
+            errorDetail: null,
+            httpStatus: null,
+            retryCount: 0,
+            nextRetryAt: null,
+            processedAt: null,
+            interactionId: null,
+            discoveryReason: "inbox_requeue",
+            lastRequeuedAt: new Date(),
+            requeueCount: sql`${gmailIngestionLedger.requeueCount} + 1`,
+            lastRequeueEventId: r.eventHistoryId,
+            // an ignored row shouldn't hold a live lease, but clear defensively so the
+            // re-classification round can claim the freshly-pending row.
+            claimToken: null,
+            claimExpiresAt: null,
+            claimStage: null,
+          })
+          .where(
+            and(
+              eq(gmailIngestionLedger.integrationId, integrationId),
+              eq(gmailIngestionLedger.gmailMessageId, r.gmailMessageId),
+              eq(gmailIngestionLedger.status, "ignored"),
+              sql`(${gmailIngestionLedger.lastRequeueEventId} is null or cast(${r.eventHistoryId} as unsigned) > cast(${gmailIngestionLedger.lastRequeueEventId} as unsigned))`,
+            ),
+          );
+      }
       return rows.length;
     },
 
-    async listUnclassified(integrationId, nowMs) {
+    async claimUnclassified(integrationId, claimToken, leaseExpiresAt, nowMs) {
       const now = new Date(nowMs);
-      const rows = await db
-        .select()
-        .from(gmailIngestionLedger)
+      // P0-3 — atomic CAS claim: stamp OUR token on up to a batch of candidate rows
+      // that are free (unclaimed) or whose lease expired. A concurrent classifier with
+      // a different token matches a DISJOINT set (already-leased rows fall out of the
+      // WHERE), so the two never claim the same row. affectedRows = # we won.
+      await db
+        .update(gmailIngestionLedger)
+        .set({ claimToken, claimExpiresAt: leaseExpiresAt, claimStage: "classify" })
         .where(
           and(
             eq(gmailIngestionLedger.integrationId, integrationId),
@@ -261,10 +291,21 @@ export function createDrizzleLedgerStore(
             isNull(gmailIngestionLedger.route),
             // classify-retry backoff gate: fresh rows have nextRetryAt NULL; a row
             // whose hydrate/sniff threw waits out its F-skeleton backoff here.
-            or(
-              isNull(gmailIngestionLedger.nextRetryAt),
-              lte(gmailIngestionLedger.nextRetryAt, now),
-            ),
+            or(isNull(gmailIngestionLedger.nextRetryAt), lte(gmailIngestionLedger.nextRetryAt, now)),
+            // lease-free: unclaimed, or a prior lease already lapsed.
+            or(isNull(gmailIngestionLedger.claimToken), lte(gmailIngestionLedger.claimExpiresAt, now)),
+          ),
+        )
+        .orderBy(asc(gmailIngestionLedger.firstSeenAt))
+        .limit(LEDGER_CLASSIFY_BATCH);
+      // read back EXACTLY the rows this token now owns.
+      const rows = await db
+        .select()
+        .from(gmailIngestionLedger)
+        .where(
+          and(
+            eq(gmailIngestionLedger.integrationId, integrationId),
+            eq(gmailIngestionLedger.claimToken, claimToken),
           ),
         )
         .orderBy(asc(gmailIngestionLedger.firstSeenAt))
@@ -272,10 +313,27 @@ export function createDrizzleLedgerStore(
       return rows.map(mapLedgerRow);
     },
 
-    async recordClassifyFailure(ledgerId, cls, retryCount, nextRetryAt, at) {
-      // NON-terminal (對抗審查修正 2): status stays pending + route stays NULL so
-      // the row is re-classified after the backoff — never noise'd by a sniff error.
-      await db
+    async renewClaim(ledgerId, claimToken, leaseExpiresAt) {
+      const res = await db
+        .update(gmailIngestionLedger)
+        .set({ claimExpiresAt: leaseExpiresAt })
+        .where(and(eq(gmailIngestionLedger.id, ledgerId), eq(gmailIngestionLedger.claimToken, claimToken)));
+      return affectedRows(res) > 0;
+    },
+
+    async releaseClaim(ledgerId, claimToken) {
+      const res = await db
+        .update(gmailIngestionLedger)
+        .set(CLAIM_CLEAR)
+        .where(and(eq(gmailIngestionLedger.id, ledgerId), eq(gmailIngestionLedger.claimToken, claimToken)));
+      return affectedRows(res) > 0;
+    },
+
+    async recordClassifyFailure(ledgerId, cls, retryCount, nextRetryAt, at, claimToken) {
+      // NON-terminal (對抗審查修正 2): status stays pending + route stays NULL so the
+      // row is re-classified after the backoff — never noise'd by a sniff error. Gated
+      // by claimToken (a lost lease → affectedRows=0 → false); releases the lease.
+      const res = await db
         .update(gmailIngestionLedger)
         .set({
           failureKind: cls.failureKind,
@@ -284,12 +342,14 @@ export function createDrizzleLedgerStore(
           retryCount,
           nextRetryAt,
           lastAttemptAt: at,
+          ...CLAIM_CLEAR,
         })
-        .where(eq(gmailIngestionLedger.id, ledgerId));
+        .where(and(eq(gmailIngestionLedger.id, ledgerId), eq(gmailIngestionLedger.claimToken, claimToken)));
+      return affectedRows(res) > 0;
     },
 
-    async classify(ledgerId, fields) {
-      await db
+    async classify(ledgerId, fields, claimToken) {
+      const res = await db
         .update(gmailIngestionLedger)
         .set({
           fromAddress: fields.fromAddress,
@@ -301,8 +361,12 @@ export function createDrizzleLedgerStore(
           lastAttemptAt: fields.classifiedAt,
           // a terminal ignored classification also stamps processedAt (audit).
           ...(fields.status === "ignored" ? { processedAt: fields.classifiedAt } : {}),
+          // release the classify lease — a history-mode customer/receipt row then
+          // becomes free for the feeder to claim; a terminal ignored row is done.
+          ...CLAIM_CLEAR,
         })
-        .where(eq(gmailIngestionLedger.id, ledgerId));
+        .where(and(eq(gmailIngestionLedger.id, ledgerId), eq(gmailIngestionLedger.claimToken, claimToken)));
+      return affectedRows(res) > 0;
     },
 
     async advanceCursorCAS(integrationId, expectedHistoryId, newHistoryId, syncedAt) {
@@ -327,11 +391,18 @@ export function createDrizzleLedgerStore(
         .where(eq(gmailIntegration.id, integrationId));
     },
 
-    async listActionable(integrationId, nowMs) {
+    async claimActionable(integrationId, claimToken, leaseExpiresAt, nowMs) {
       const now = new Date(nowMs);
-      const rows = await db
-        .select()
-        .from(gmailIngestionLedger)
+      // P0-3 — atomic CAS claim of the feeder's actionable batch. This claim is the
+      // LAST gate before a downstream side effect: a concurrent feeder gets a disjoint
+      // set. HONEST scope (對抗審查修正): token-gated writes make the LEDGER outcome
+      // exactly-once; the downstream side effect itself is at-least-once — if a lease
+      // lapses mid-flight (heartbeat-failure window) a peer may re-claim and re-process
+      // the same message, deduped by the downstream external-id idempotency (design §5,
+      // processOneEmail / receipt chain keyed on gmailMessageId/external key).
+      await db
+        .update(gmailIngestionLedger)
+        .set({ claimToken, claimExpiresAt: leaseExpiresAt, claimStage: "feed" })
         .where(
           and(
             eq(gmailIngestionLedger.integrationId, integrationId),
@@ -349,6 +420,19 @@ export function createDrizzleLedgerStore(
                 lte(gmailIngestionLedger.nextRetryAt, now),
               ),
             ),
+            // lease-free: unclaimed, or a prior lease already lapsed.
+            or(isNull(gmailIngestionLedger.claimToken), lte(gmailIngestionLedger.claimExpiresAt, now)),
+          ),
+        )
+        .orderBy(asc(gmailIngestionLedger.firstSeenAt))
+        .limit(LEDGER_FEED_BATCH);
+      const rows = await db
+        .select()
+        .from(gmailIngestionLedger)
+        .where(
+          and(
+            eq(gmailIngestionLedger.integrationId, integrationId),
+            eq(gmailIngestionLedger.claimToken, claimToken),
           ),
         )
         .orderBy(asc(gmailIngestionLedger.firstSeenAt))
@@ -356,8 +440,10 @@ export function createDrizzleLedgerStore(
       return rows.map(mapLedgerRow);
     },
 
-    async markProcessed(ledgerId, interactionId, at) {
-      await db
+    async markProcessed(ledgerId, interactionId, at, claimToken) {
+      // Gated by claimToken (§五 corruption guard): a runner whose lease was re-taken by
+      // a peer can NOT write here, so a stale success never clobbers the peer's outcome.
+      const res = await db
         .update(gmailIngestionLedger)
         .set({
           status: "processed",
@@ -365,19 +451,25 @@ export function createDrizzleLedgerStore(
           processedAt: at,
           lastAttemptAt: at,
           nextRetryAt: null,
+          ...CLAIM_CLEAR,
         })
-        .where(eq(gmailIngestionLedger.id, ledgerId));
+        .where(and(eq(gmailIngestionLedger.id, ledgerId), eq(gmailIngestionLedger.claimToken, claimToken)));
+      return affectedRows(res) > 0;
     },
 
-    async markIgnored(ledgerId, failureKind, at) {
-      await db
+    async markIgnored(ledgerId, failureKind, at, claimToken) {
+      const res = await db
         .update(gmailIngestionLedger)
-        .set({ status: "ignored", failureKind, processedAt: at, lastAttemptAt: at, nextRetryAt: null })
-        .where(eq(gmailIngestionLedger.id, ledgerId));
+        .set({ status: "ignored", failureKind, processedAt: at, lastAttemptAt: at, nextRetryAt: null, ...CLAIM_CLEAR })
+        .where(and(eq(gmailIngestionLedger.id, ledgerId), eq(gmailIngestionLedger.claimToken, claimToken)));
+      return affectedRows(res) > 0;
     },
 
-    async markFailed(ledgerId, cls, retryCount, nextRetryAt, at) {
-      await db
+    async markFailed(ledgerId, cls, retryCount, nextRetryAt, at, claimToken) {
+      // §五 THE state-corruption guard: if A already markProcessed (clearing the lease),
+      // B's UNIQUE-key-collision markFailed carries a token the row no longer holds →
+      // affectedRows=0 → B can NEVER flip A's processed back to failed.
+      const res = await db
         .update(gmailIngestionLedger)
         .set({
           status: "failed",
@@ -387,8 +479,10 @@ export function createDrizzleLedgerStore(
           retryCount,
           nextRetryAt,
           lastAttemptAt: at,
+          ...CLAIM_CLEAR,
         })
-        .where(eq(gmailIngestionLedger.id, ledgerId));
+        .where(and(eq(gmailIngestionLedger.id, ledgerId), eq(gmailIngestionLedger.claimToken, claimToken)));
+      return affectedRows(res) > 0;
     },
 
     async existingMessageIds(integrationId, gmailMessageIds) {
@@ -456,6 +550,10 @@ function mapLedgerRow(r: LedgerSelectRow): LedgerRow {
     discoveryReason: r.discoveryReason ?? null,
     requeueCount: r.requeueCount,
     lastRequeuedAt: r.lastRequeuedAt ?? null,
+    lastRequeueEventId: r.lastRequeueEventId ?? null,
+    claimToken: r.claimToken ?? null,
+    claimExpiresAt: r.claimExpiresAt ?? null,
+    claimStage: r.claimStage ?? null,
   };
 }
 
@@ -608,13 +706,17 @@ export async function runIntakeForIntegration(integrationId: number): Promise<In
     downstream: cursor.intakeMode === "history" ? createDownstreamPort(cursor) : undefined,
   };
 
-  const sync = await syncHistoryForIntegration(deps, integrationId);
-  const classify = await classifyPendingLedger(deps, integrationId);
-  const result: IntakeRunResult = { ran: true, mode: cursor.intakeMode, sync, classify };
-  if (cursor.intakeMode === "history") {
-    result.feed = await feedPendingDownstream(deps, integrationId);
-  }
-  return result;
+  // P0-3 orchestration fencing (Codex 16 輪 §六.3) — the sync→gate→classify→feed
+  // composition lives in the pure engine (runIntakeStages), so the fencing gate is
+  // unit-tested with fakes; this adapter only wires deps + shapes the run result.
+  const stages = await runIntakeStages(deps, integrationId, cursor.intakeMode);
+  return {
+    ran: true,
+    mode: cursor.intakeMode,
+    sync: stages.sync,
+    classify: stages.classify,
+    feed: stages.feed,
+  };
 }
 
 /** Run the 5-minute reconciliation for ONE (non-legacy) integration. */

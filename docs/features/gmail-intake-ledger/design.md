@@ -81,6 +81,7 @@ E backfill 與 136 分類表=獨立唯讀工具(dry-run 輸出 metadata 清單),
 - 發現量無上限:cap 只限下游處理批量,不限事件發現。
 - 逐頁推進:每頁全部 messageId 耐久落帳後,官方游標可 CAS 推進到「已落帳前綴」的該頁 historyId;絕不推過未落帳頁。crash 從上次前綴重跑,唯一鍵去重,無前頁循環。
 - 測試:backlog>3×cap 多輪收斂(每 messageId 最終入帳、tail 可達、backlog 歸零、零重複、游標僅隨完整前綴推進)、page-2 crash、continuation 失效重跑。
+- 冪等邊界明示(Codex 16 輪對抗審查):row claim + token-gated 寫回保證的是 ledger 終態恰一次;下游商業副作用本質 at-least-once —— 心跳續租失效的極端窗口(單封超租且 peer 重搶)同一封信可能兩次進 downstream.process,去重依賴 §3/§5 既有要求的下游 external-id 冪等(processOneEmail/收據鏈以 gmailMessageId/既有外部鍵去重),此依賴為切片外保證,不得移除。
 
 ### v814 狀態梯(12 輪 §七,照抄為紀律)
 code review(現在)→ inert deploy(旗標全關+migration rehearsal/manifest/smoke/forward-fix 齊)→ shadow(兩 P0+receipt route 修好+證明零回信零建單零貼標零收據寫入)→ authoritative(兩信箱 parity+30 天 dry-run+136 分類+watch 運行證據,逐信箱)。
