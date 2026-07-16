@@ -598,3 +598,184 @@ describe("runInquiryAgent — 英文客人語言 gate(2026-07-01,Leslie 反例)"
     expect(out.draftDropped).toBeUndefined();
   });
 });
+
+describe("runInquiryAgent — attachment fail-closed gate (pdf-attachment-reliability 2026-07-15)", () => {
+  beforeEach(() => {
+    invokeLLMSpy.mockReset();
+  });
+
+  const inputWith = (
+    attachments: Array<{
+      filename: string;
+      kind: string;
+      sizeBytes: number;
+      text: string;
+      parseStatus: string;
+      parseError?: string;
+    }>,
+  ) => ({
+    rawMessage: "Subject: 行程請教\n\n您好,請看附件的行程草稿。",
+    channel: "email" as const,
+    attachments,
+  });
+
+  it("任一附件非 ok/ok_truncated → 強制 shouldEscalate=true、shouldAutoReply=false", async () => {
+    invokeLLMSpy.mockResolvedValueOnce(
+      stubLLMResponse("new_inquiry", { confidence: 95 }),
+    );
+    const out = await runInquiryAgent(
+      inputWith([
+        {
+          filename: "trip.pdf",
+          kind: "pdf",
+          sizeBytes: 144340,
+          text: "",
+          parseStatus: "parse_error",
+          parseError: "pdf-parse export is not callable",
+        },
+      ]),
+    );
+    expect(out.shouldEscalate).toBe(true);
+    expect(out.shouldAutoReply).toBe(false);
+    expect(out.escalationReason).toContain("trip.pdf");
+  });
+
+  // Codex 12:01 §五.2 — the matcher is demoted to an advisory highlighter:
+  // a leaky draft still ESCALATES, but the draft is PRESERVED for Jeff (no
+  // more drops — the previous rule destroyed good drafts like「請勿重傳附件」).
+  it("草稿洩漏讀檔失敗措辭 → 升級但保留草稿(matcher 只提示,不丟稿)", async () => {
+    invokeLLMSpy.mockResolvedValueOnce(
+      stubLLMResponse("new_inquiry", {
+        confidence: 95,
+        draftReply: "您好,您的附件我們無法解析,請重傳一次,謝謝。",
+      }),
+    );
+    const out = await runInquiryAgent(
+      inputWith([
+        {
+          filename: "trip.pdf",
+          kind: "pdf",
+          sizeBytes: 1000,
+          text: "Day 1 city tour",
+          parseStatus: "ok",
+        },
+      ]),
+    );
+    expect(out.shouldEscalate).toBe(true);
+    expect(out.shouldAutoReply).toBe(false);
+    expect(out.draftReply.length).toBeGreaterThan(0); // preserved, not dropped
+    expect(out.draftDropped).toBeUndefined();
+    expect(out.escalationReason).toContain("注意"); // risk highlight on the card
+  });
+
+  // Codex 12:01 §五.1 — attachment mail is SUSPENDED from autonomous send:
+  // even readable attachments + a clean draft escalate. The draft survives
+  // intact; only the send decision changes.
+  it("附件全 ok + 乾淨草稿 → 仍升級(附件信一律人工),草稿完整保留", async () => {
+    invokeLLMSpy.mockResolvedValueOnce(
+      stubLLMResponse("new_inquiry", { confidence: 95 }),
+    );
+    const out = await runInquiryAgent(
+      inputWith([
+        {
+          filename: "trip.pdf",
+          kind: "pdf",
+          sizeBytes: 1000,
+          text: "Day 1 city tour",
+          parseStatus: "ok",
+        },
+      ]),
+    );
+    expect(out.shouldEscalate).toBe(true);
+    expect(out.shouldAutoReply).toBe(false);
+    expect(out.draftReply.length).toBeGreaterThan(0);
+    expect(out.draftDropped).toBeUndefined();
+  });
+
+  it("無附件 + 乾淨草稿 → 不升級(暫停範圍只限附件信,控制組)", async () => {
+    invokeLLMSpy.mockResolvedValueOnce(
+      stubLLMResponse("new_inquiry", { confidence: 95 }),
+    );
+    const out = await runInquiryAgent(inputWith([]));
+    expect(out.shouldEscalate).toBe(false);
+    expect(out.shouldAutoReply).toBe(true);
+    expect(out.draftReply.length).toBeGreaterThan(0);
+  });
+
+  // Codex 14:07 P1-4 lineage — markdown 拆詞:「無法**解析**」raw 掃不到,
+  // stripMarkdownForEmail 後才成完整危險詞。現在的意義是 HINT 品質:canonical
+  // 掃描仍要抓到並在卡片上高亮,但草稿保留(Codex 12:01 §五.2)。
+  it("markdown 拆詞的危險詞在 canonical draft 被高亮 → 升級 + 保稿", async () => {
+    invokeLLMSpy.mockResolvedValueOnce(
+      stubLLMResponse("new_inquiry", {
+        confidence: 95,
+        draftReply: "您好,您的附件我們無法**解析**,請重**傳**一次,謝謝。",
+      }),
+    );
+    const out = await runInquiryAgent(
+      inputWith([
+        {
+          filename: "trip.pdf",
+          kind: "pdf",
+          sizeBytes: 1000,
+          text: "Day 1 city tour",
+          parseStatus: "ok",
+        },
+      ]),
+    );
+    expect(out.shouldEscalate).toBe(true);
+    expect(out.shouldAutoReply).toBe(false);
+    expect(out.draftReply.length).toBeGreaterThan(0);
+    expect(out.escalationReason).toContain("注意");
+  });
+
+  // Codex 14:07 §四.2 — raw parseError 不得進 customer-draft prompt(prod
+  // 事故:模型把「pdf-parse export is not callable」原話說給客人)。prompt
+  // 只收 non-readable 狀態;原始錯誤留 log / Jeff metadata。
+  it("raw parseError 不進 LLM prompt,parseStatus 照樣可見", async () => {
+    invokeLLMSpy.mockResolvedValueOnce(
+      stubLLMResponse("new_inquiry", { confidence: 95 }),
+    );
+    await runInquiryAgent(
+      inputWith([
+        {
+          filename: "trip.pdf",
+          kind: "pdf",
+          sizeBytes: 144340,
+          text: "",
+          parseStatus: "parse_error",
+          parseError: "pdf-parse export is not callable",
+        },
+      ]),
+    );
+    const call = invokeLLMSpy.mock.calls[0]?.[0] as {
+      messages: { role: string; content: string }[];
+    };
+    const allPromptText = call.messages.map((m) => m.content).join("\n");
+    expect(allPromptText).not.toContain("not callable");
+    expect(allPromptText).not.toContain("pdf-parse");
+    expect(allPromptText).toContain("parseStatus=parse_error");
+  });
+
+  // Codex 14:07 P1-3 — not_processed(cap 溢出/hydration 失敗/救回重播)
+  // 一樣強制升級,絕不 auto-send。
+  it("not_processed 附件 → 強制升級(重播/cap 溢出情境)", async () => {
+    invokeLLMSpy.mockResolvedValueOnce(
+      stubLLMResponse("new_inquiry", { confidence: 95 }),
+    );
+    const out = await runInquiryAgent(
+      inputWith([
+        {
+          filename: "sixth.pdf",
+          kind: "unknown",
+          sizeBytes: 0,
+          text: "",
+          parseStatus: "not_processed",
+        },
+      ]),
+    );
+    expect(out.shouldEscalate).toBe(true);
+    expect(out.shouldAutoReply).toBe(false);
+    expect(out.escalationReason).toContain("sixth.pdf");
+  });
+});

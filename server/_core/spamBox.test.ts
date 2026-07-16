@@ -38,6 +38,7 @@ import {
   listSpamInteractions,
   rescueSpamInteraction,
   confirmSpamInteraction,
+  rebuildAttachmentSentinelsFromContent,
 } from "./spamBox";
 
 const getDbMock = vi.mocked(getDb);
@@ -174,6 +175,72 @@ describe("rescueSpamInteraction", () => {
         customerEmail: "",
       }),
     );
+  });
+
+  // Codex 14:07 P1-3 — the replay must preserve attachment EXISTENCE: the
+  // stored row only has the 【附件】 text summary, so the rescued agent run
+  // gets not_processed sentinels (→ reply gate escalates, no auto-send)
+  // instead of drafting as if the email had no attachments.
+  it("replays attachment existence as not_processed sentinels for the agent gate", async () => {
+    const rowWithAtt = {
+      ...SPAM_ROW,
+      content:
+        "九月想帶媽媽去日本,行程在附件。\n\n【附件】\n1. 行程草稿.pdf (pdf, 141KB, ok)\n2. 名單 (final).xlsx (xlsx, 20KB, parse_error)",
+    };
+    getDbMock.mockResolvedValue(fakeDb([[rowWithAtt], []]));
+    createInquiryMock.mockResolvedValue({ id: 45 } as any);
+    runAgentMock.mockResolvedValue({ classification: "new_inquiry" } as any);
+    produceMock.mockResolvedValue({ id: 101, riskLevel: "review" } as any);
+
+    await rescueSpamInteraction(7);
+
+    expect(runAgentMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        attachments: [
+          expect.objectContaining({
+            filename: "行程草稿.pdf",
+            kind: "pdf",
+            parseStatus: "not_processed",
+            text: "",
+          }),
+          expect.objectContaining({
+            filename: "名單 (final).xlsx",
+            kind: "xlsx",
+            parseStatus: "not_processed",
+          }),
+        ],
+      }),
+    );
+  });
+
+  it("no attachment summary in content → no attachments passed (normal mail unaffected)", async () => {
+    getDbMock.mockResolvedValue(fakeDb([[SPAM_ROW], []]));
+    createInquiryMock.mockResolvedValue({ id: 46 } as any);
+    runAgentMock.mockResolvedValue({ classification: "new_inquiry" } as any);
+    produceMock.mockResolvedValue({ id: 102, riskLevel: "review" } as any);
+
+    await rescueSpamInteraction(7);
+
+    expect(runAgentMock).toHaveBeenCalledWith(
+      expect.objectContaining({ attachments: undefined }),
+    );
+  });
+});
+
+describe("rebuildAttachmentSentinelsFromContent (pure)", () => {
+  it("parses filenames with spaces and parens off the LAST parenthetical", () => {
+    const out = rebuildAttachmentSentinelsFromContent(
+      "正文。\n\n【附件】\n1. trip (v2) final.pdf (pdf, 141KB, ok)",
+    );
+    expect(out).toHaveLength(1);
+    expect(out[0].filename).toBe("trip (v2) final.pdf");
+    expect(out[0].kind).toBe("pdf");
+    expect(out[0].parseStatus).toBe("not_processed");
+    expect(out[0].parseError).toContain("not re-parsed");
+  });
+
+  it("returns [] when there is no 【附件】 block", () => {
+    expect(rebuildAttachmentSentinelsFromContent("一般客戶內容,無附件。")).toEqual([]);
   });
 });
 
