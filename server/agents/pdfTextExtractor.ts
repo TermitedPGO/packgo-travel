@@ -56,22 +56,15 @@ async function downloadPdf(url: string): Promise<string> {
 
 /**
  * 方法一：使用 pdf-parse 提取文字（純 Node.js）
+ *
+ * pdf-attachment-reliability (2026-07-15):pdf-parse 一律走
+ * `_core/pdfParse.ts` 單一 adapter(v2 class API:new PDFParse({data}) →
+ * getText → destroy)。此檔不再自行解析 pdf-parse 模組形狀 — 上次就是
+ * 這裡與 attachmentParser 各養一套 resolver,v1→v2 升版後兩套一起爛。
  */
 async function extractWithPdfParse(pdfBuffer: Buffer): Promise<{ text: string; pageCount: number }> {
-  // 動態 import 避免 ESM/CJS 衝突。用 resolvePdfParse 防呆:prod 打包後
-  // pdf-parse 會被雙層包成 { default: { default: fn } },舊寫法 .default ?? module
-  // 會挑到物件而非函式,造成 "pdfParse is not a function"。
-  const { resolvePdfParse } = await import("../_core/attachmentParser");
-  const pdfParse = resolvePdfParse(await import("pdf-parse"));
-  if (!pdfParse) throw new Error("pdf-parse export is not callable");
-  const data = (await pdfParse(pdfBuffer, {
-    // 限制頁數避免超時（最多 50 頁）
-    max: 50,
-  })) as { text?: string; numpages?: number };
-  return {
-    text: data.text || "",
-    pageCount: data.numpages || 0,
-  };
+  const { extractPdfTextPrimary } = await import("../_core/pdfParse");
+  return extractPdfTextPrimary(pdfBuffer); // 內建 50 頁上限
 }
 
 /**
