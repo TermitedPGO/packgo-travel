@@ -112,3 +112,10 @@
 - 本趟 session 動 6 檔(13:20 §五 固定清單內):`gmailPipeline.finalgate.test.ts`、`inquiryAgent.ts`(僅註解)+ proposal/design/progress/tasks-batch-4。全 branch scope:base `4c862548`,**16 tracked modified + 14 untracked = 30 檔**,tracked 1,459 insertions/146 deletions,untracked 2,912 行(定稿後 wc 實測、等行數 in-line 填值),staged 0,`inquiries.ts` diff 0;主樹/sagadocs/電話 hotfix 零污染。
 - 7/15 殘留的兩組唯讀 tsx probe process(Codex §六點名 PID 60691/76420):命令行即證據(`tsx -e "import { detectReceipt } …"`/`tsx -e "import { listMessagesByIds, fetchR…"`,為 batch-1/2 施工期的本 feature 唯讀驗證探針,無寫入、無 git lock),本趟複查時兩組 PID(含同組 60224/60660/61154/75958/76386/76419/76421)已全部自行結束 —— ps 全空、全機零 `tsx -e` 殘留、無 git lock,不需終止;至此可宣稱零 process occupancy。
 - **狀態:全部未 commit/未 push/未 deploy,停止,交 Codex 提交前確認。**
+
+## 2026-07-16(批次閉環:Codex 15:02 終驗 PASS + Jeff 提交)
+
+- Codex 15:02 PDT 最終確認:**PASS,P0 0/P1 0/P2 0**,B4-T28 由 Codex 親勾;13:20 production safety、regression assertions 與 14:13 四處 docs-integrity 全部閉合,取得本地提交前機械資格。
+- Jeff 親自提交:commit **`2c420f57`** 於 branch `pdf-attachment-parser-fix`(30 檔,4,371 insertions/146 deletions;pre-commit tsc 0 錯 + i18n parity 7,922 keys 100%)。
+- 狀態階梯:**已提交,未合併、未部署、未啟用**。併 main 與部署(`pnpm ship`)另行裁定;上線即行為變更 —— 附件信全部改走 Jeff 卡片確認,不再自動回覆。
+- 本段於 commit 後補寫(批次閉環記錄,做完即寫),為 worktree 目前唯一未提交變更。
