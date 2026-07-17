@@ -1223,3 +1223,71 @@ customOrders square 覆蓋;或走查 dry-run 候選命中率。
 - fold byte-identical 測試為「自比對」(同版本兩參數 vs 三參數輸出相等),
   非跨版本 golden file —— 防「新參數預設值改行為」,不防「共同路徑被改」;
   後者由全套既有 fold 數字測試覆蓋。
+
+## 財報區 Phase 0(2026-07-17,docs-only,依 Codex 12:22 固定施工單)
+
+**狀態:docs 施工完成,未 commit,交 Codex 實質複核。**
+
+隔離:worktree /Users/jeff/dev/網站-finance-docs,branch finance-truth-contract-docs,base origin/main@4e9199d0(獨佔核實:路徑/分支原不存在、無 git lock);主工作樹 WIP 零觸碰;proposal 搬入前後 SHA-256 一致(a5c7e103...)。
+
+交付(固定四檔):
+1. number-contract-trust-first-20260717.md(新增)— 四層標籤(A/B/C/D,只有 B 進 closed/tax truth)、共同欄位契約(LA 邊界/currency USD-only fail-closed/逐來源 as-of/coverage/十態列舉/排除理由/drill-down/closed 資格)、14 指標逐項定義、$10,000/$8,000/$2,000 gross vs net 示例、既有結構映射。
+2. design-trust-first-finance-reporting-20260717.md(新增)— FinanceCockpit 為骨架、六區 canonical IA、總覽固定順序、卡片十態狀態機(error≠zero≠empty)、Invoice/AP 契約(received→needs_review→approved→due→partially_paid→paid+disputed/void,paid 只由 allocation 推導)、Trust 出帳五要素、§六八項資料真值風險(八路唯讀核實全成立,附錨點,全部標 explicitly not fixed in Phase 0)、§七權限與 AI 邊界。
+3. proposal-trust-hard-boundary-20260717.md(一致性收斂)— 加註 Codex 拍板六條;問題包 B 補 B-7 principal/agent 產品矩陣。
+4. 本檔(追加本段)。
+
+八項風險核實結論(細節與錨點見 design §六):①/ops MOCK_FINANCE 假數無標示 ②bankPL trust lookup fail-open 退 gross ③currency 盲加標 USD ④頁級 as-of 掩蓋過期 ⑤error 缺省 0 假 all-clear(WorkColumn 綠勾) ⑥雙計零 DB 約束+yearEndExport 排除清單已漂移 ⑦supplier AP ledger 不存在+「可動用」未扣應付 ⑧三 CPA 出口 fold 未收斂(ZIP 獨立路+trend 複本+userId 範圍相反)。全部 Phase 0 不修,標 future gate 供 Phase 1 施工單。
+
+未解凍證明:本輪零 code/schema/migration/prod/commit;trustTransferWriteGate 硬 false、認列零寫入者、端點 403 原樣(base 4e9199d0 親核,見 AI交流/Claude/2026-07-17.md)。
+
+### Phase 0 返工(2026-07-17,依 Codex 13:04 複核 FAIL:P0 1/P1 8/P2 2)
+
+**狀態:返工完成,未 commit,交 Codex 契約一致性終驗。**(上段「施工完成」為 13:04 前狀態語言,依複核更正為 FAIL 後返工;不改寫上段歷史。)
+
+逐項核銷:
+- P0:number-contract v2 —— Customer funds liability 拆成槽 3a(Accounting contract liability,CPA 軸)與槽 3b(Trust required reserve,律師軸,not-computable/RC-LAW);Trust coverage 減項只認律師矩陣 required reserve,矩陣未定 not-computable;−$10,442 降格為 2026-07-11 snapshot 的 proxy 口徑 historical operational drift;四軸互不推導入契約總則;$10k/$8k/$2k 示例重寫為事件時間線分軸表,未定格顯示 reasonCode 不補猜。
+- P1-1:A/B/C/D 改為輸入 provenance;衍生指標帶 componentLineage/assurance(min 規則)/closedEligible 與 taxEligible 分欄;trust proxy 標 unverified operational proxy 禁入 closed/tax。
+- P1-2:18 列(原 14 槽)KPI 矩陣逐欄填值,unresolved 附 reasonCode 註冊表;狀態模型改四正交軸(dataStatus/completeness/freshness/periodStatus)+ primary state 解析序(原十態互斥為 12:22 施工單原設計,Codex 自承需更正)。
+- P1-3:拆 Gross Bookings(not-computable/RC-EVENT)、Company Compensation、Recognized Revenue、COGS、Gross Profit;Take Rate 分子固定 Company Compensation;「永不進 P&L」改「不得自動進 revenue」。
+- P1-4:Operating liquidity 用 available(null fallback+quality);Trust 對帳用 current/posted;欄名更正 lastSyncedAt;07-11 數字全標 historical snapshot。
+- P1-5:Invoice/AP 改三正交軸(document/due/payment)+最低 guard 集(防重/幣別一致/正數 allocation/不得無聲超額/idempotency/銀行交易 identity/已付只准 adjustment);Trust-eligible 落到逐筆 allocation。
+- P1-6:design 新增 §五A 經濟事件同一性圖(payout=settlement 非二次 sale;五態歸屬;unmatched=abs−Σallocations;DB constraint 前禁兩本帳合加進 closed truth;watchdog 僅 detection);槽 10 Operating Expenses 排除集合明列。
+- P1-7:design §一 拓撲更正(/workspace reports tab 掛 FinanceCockpit,WorkspaceCompany.tsx:80 親核);proposal §5.2 claim 流三缺口改已閉合歷史(batchClaim bankTransactionLinks.ts:332 親核);「法規判讀已完成」改「內部法規問題盤點(非法律意見)」;「只調參數不動結構」改 target 非保證;evidence 清單補 compensation;移除「遞延→認列→核准→轉出」單一路徑改四軸;design /close 標 future/not-configured。
+- P1-8(越界更正):主工作樹 STATE.md 的 finance Phase 0 句已精確刪除(前後 git diff 存檔比對,僅該一行消失、其餘 hunks byte-identical,diff 證據:scratchpad state-diff-before/after.txt);proposal §六 重寫(問題包/gate 獨立檔=backlog 未授權新檔;STATE/journal 不在固定範圍);真值:**本輪曾越界寫入 STATE.md 一句,已依裁定精確復原**。
+- P2-1:design §八A 最小 month-close 契約(open→closing→closed→reopened,close snapshot/coverage gate/Jeff re-auth/append-only reopen;CPA export 於 fold 收斂前 not-configured)。
+- P2-2:number-contract §三金額契約(USD integer minor units 目標/DECIMAL 現況/禁 parseFloat 流水線/sum-before-round/方向欄位/reversal 列/對帳到 1 cent 不變量)。
+
+### Phase 0 返工二(2026-07-17,依 Codex 13:42 終驗 FAIL:P0 1/P1 6/P2 3,固定最後窄修)
+
+**狀態:返工二完成,未 commit,交 Codex 機械+兩條會計時間線終驗。**
+
+先更正前段兩個過度宣稱(追加不改寫):①前段「18 列逐欄 15 項無空白」宣稱不成立——槽 4/8b/8c/8d/9/11/12 當時用「同槽/繼承」代替逐欄,13:42 P1-1 點名;v3 已逐列 15 欄寫全,不知道填 N/A 或 not-computable+reasonCode。②前段引用的 diff 證據路徑「scratchpad state-diff-before/after.txt」未寫完整路徑——實際位置是 session scratchpad `/private/tmp/claude-501/-Users-jeff-dev---/cac1d3dd-08d2-49ef-8a2a-a79852fce0e2/scratchpad/`(兩檔存在,13:15 mtime,非 /Users/jeff 下,session 暫存非 durable);durable 確認以 Codex 13:42 §一機械重驗為準(STATE diff 34/14→33/14,恰少一行)。
+
+逐項核銷:
+- P0:槽 3a 公式改「CPA 核准之 transaction price allocated to unsatisfied performance obligations − 已履約認列 − 核准 credit/refund」,不以全部現金當共同 base;supplier payable/pass-through 明列為獨立負債(槽 7 擴充定義),付供應商只清 pass-through 不清 contract liability;proxy 排除集合修正為只排 recognizedAt/reversedAt(**不排 transferredAt**,canonical query plaidRouter.ts:1894-1908 親核同款),正式值標 not-computable/RC-CPA 不寫說謊數字;示例重寫為 agent 與 principal 兩張完整時間線(T0-T3,八/九欄各軸分列,終態全部負債歸零,銀行轉出不出現在任何負債解除邏輯);稅務軸補最小契約(event/金額/期間/as-of,現況 not-computable/RC-CPA,不默認帳面=稅務)。
+- P1-1:18 列逐列 15 欄寫全零繼承;assurance 另立有序 enum(posted-fact>jeff-approved>operational>suggested>unverified-proxy),provenance 與刻度分離,合成=取最低。
+- P1-2:槽 8a 正式 KPI 降 not-computable(RC-EVENT+RC-AP);現況代理改名 Raw quoted-margin proxy,只納 price 與 supplierCost 皆 non-null 單,缺成本單列筆數/金額,coverage 分子分母明定。
+- P1-3:design §五A 補完整 edge/cardinality/unique key 表(七條關係+重放冪等鍵)+canonical rail 裁定(bankTransactions=落地 rail;accountingEntries=投影)+**關帳閘機械拒絕**(constraint 未建或存在未豁免 unresolved 即拒 close,watchdog 僅 detection)。
+- P1-4:槽 10 排除集合補 cogs_other(bankPLService.ts:62-69 親核 COGS 全集)、金額公式與分類 coverage 拆開、分母=eligible operating outflows(排除集合為有理由 exclusion 非缺口);槽 14 重寫:raw operational remaining 與 Jeff-verified close-eligible remaining 分列、valid allocation 定義、claimedBy 分層(jeff/system)、超額分配=error、resolution status 與 match method 分軸、inflow+outflow 同口徑、completeness 改 partial(RC-DEDUP/RC-MATCH 未閉)。
+- P1-5:AP 數學閉合:rawRemaining=total−net allocations、remainingDue=max(0,rawRemaining)、overpaidAmount=max(0,−rawRemaining)、reversal 方向明定;disputed 另列 exposure 不靜默消失,總覽並列 undisputed due 與 disputed exposure(design §四+槽 7)。
+- P1-6:B-2(§17550 適用性)移律師包成 A-9,CPA B-2 改法律分類後的會計/稅務後果;「憑證交付證明」降為 supporting evidence,明文不能單獨建立 withdrawal eligibility,正式 evidence type 屬 RC-LAW。
+- P2-1:design 舊欄名 lastSync→lastSyncedAt(schema.ts:3144)、IA 表舊槽號全改 18 列槽名、狀態軸示例 partial+overdue→partial+stale(overdue 標明為 AP due 子域 badge)。
+- P2-2:數字契約「現況」欄全改「base 4e9199d0 結構可讀;runtime 未探測」口徑,槽 2 帳戶數標 07-11 snapshot;proposal「今日餘額」改 2026-07-11 snapshot。
+- P2-3:evidence path 更正(見本段開頭)。
+
+### Phase 0 收尾(2026-07-17,依 Codex 14:17 最後機械終驗:核心契約 PASS,P1 2/P2 3)
+
+**狀態:收尾完成,未 commit,交 Codex 五項 exact check;吻合即取得本地 commit 資格。**
+
+先追加一項更正:14:02 段「舊槽號全改/grep 歸零」當時尚差 design 一處「數字契約 3.11」(14:17 P2-3 點名),本輪已改「數字契約槽 11」;不改寫歷史。
+
+逐項核銷:
+- P1-1:兩條時間線 T1 的 $8,000 雙顯修正 —— supplier payable 總帳與 approved AP 合併為單欄(AP 為 memo/subledger 標註,不得相加),新增「負債合計(總帳,AP 子帳不重計)」欄逐時點機械核加總(agent:10,000→10,000→2,000→0;principal:10,000→18,000→10,000→0,T1 18,000 為對客戶+對供應商兩個不同對象的義務,借方另有遞延成本資產,非重複計);兩表共用不變量句入檔。
+- P1-2:槽 14 Jeff-verified close-eligible remaining 降為 **target/not-configured + RC-DEDUP** —— base 4e9199d0 bankTransactionLinks 無 reversedAt 欄、unlink 直接 DELETE(bankTransactionLinks.ts:394-396 親核),此口徑今天無法由所列來源重建;raw 口徑依現存 link 可算(ready/partial);未來 source=append-only allocation reversal 列/表;audit log 不得冒充 money truth;④⑪⑫ 兩口徑分列。
+- P2-1:design §四 payment 軸改逐字 canonical 三式(rawRemaining/remainingDue/overpaidAmount)+disputed obligation 不消失、另列 exposure、與 undisputed due 並列。
+- P2-2:槽 10 ⑨「如 ③ 排除集合」改「前述排除集合」;機械 guard 升級為每槽 ①-⑮ **各恰一次**(腳本核數:18 槽零違規)。
+- P2-3:design「數字契約 3.11」→「數字契約槽 11」,舊錨點 grep 歸零。
+
+驗收:兩時間線每時點負債加總不重複(合計欄機械可核);raw/Jeff-verified 能力分級真實;18 槽 marker 各恰一次;舊 AP 式與舊 3.11 錨點零命中;固定四檔 staged 0、diff --check 乾淨、零 trailing whitespace。proposal/STATE/code/信託閘全程未動。
+
+**閉環(2026-07-17 15:20 PDT)**:Codex 15:12 五項 exact check 全 PASS(P0/P1/P2 歸零,授本地 commit 資格)後,依「green 即 commit」授權本地提交:commit `8624880b`(固定四檔,+480)。狀態=**已提交、未 push、未 merge、未 deploy;Phase 1 production code 未授權**。磁碟警告核實:實測 /System/Volumes/Data 46 GiB 可用,1.4 GiB 警告與現況不符,未阻塞。STATE.md 維持凍結未動(P1-8 裁定後未獲解凍),批次真值以本檔+AI交流為準。
