@@ -1,7 +1,17 @@
 /**
- * Trip.com Affiliate Link Service
- * Generates affiliate links with correct allianceId, SID, and deepLink IDs.
- * Also handles click tracking persistence.
+ * Trip.com affiliate — Phase 1: homepage-only clickout.
+ *
+ * Phase 1 sends the customer to Jeff's approved Trip.com affiliate entry, verbatim.
+ * PACK&GO does NOT build dynamic deep links (city/date/passenger params are never
+ * forwarded): a hand-built deep link is not an officially sanctioned affiliate link,
+ * a set Union cookie does not prove commission, and Trip.com's FAQ says not to modify
+ * platform-generated links. Dynamic deep links are a separate, later phase gated on a
+ * Trip.com Link Builder link or written confirmation — deliberately NOT behind an env
+ * flag here, so nothing can revive them on the deploy path.
+ *
+ * This module owns three things only: the approved entry constant, the outbound-URL
+ * allowlist, and the anonymous redirect telemetry writer. All redirect flow lives in
+ * ./tripRedirect and the /go/trip/:source endpoint.
  */
 
 import { createAffiliateClick } from "../db";
@@ -9,118 +19,85 @@ import { createAffiliateClick } from "../db";
 const TRIP_COM_CONFIG = {
   allianceId: "7896974",
   sid: "296102808",
-  deepLinks: {
-    flights: "D13390057",
-    hotels: "D15196722",
-    homepage: "D13390050",
-  },
+  /** Material inside Jeff's approved main affiliate entry. */
+  homepageMaterial: "D13390050",
 } as const;
 
-const BASE_URL = "https://www.trip.com/t";
+/**
+ * Jeff's approved main affiliate entry, byte-for-byte. Emitted verbatim and never
+ * rebuilt through URL/searchParams (which would re-encode and reorder it), because
+ * Trip.com's FAQ says not to modify platform-generated affiliate links. This is the
+ * ONLY Trip.com URL Phase 1 ever sends a customer to.
+ */
+export const APPROVED_HOMEPAGE_ENTRY =
+  `https://hk.trip.com/?Allianceid=${TRIP_COM_CONFIG.allianceId}` +
+  `&SID=${TRIP_COM_CONFIG.sid}&trip_sub1=&trip_sub3=${TRIP_COM_CONFIG.homepageMaterial}`;
+
+/** Official Trip.com HTTPS hosts we are willing to send a customer to. */
+const ALLOWED_TRIP_HOSTS: ReadonlySet<string> = new Set([
+  "trip.com",
+  "www.trip.com",
+  "hk.trip.com",
+  "us.trip.com",
+]);
 
 /**
- * Generate a Trip.com flight search affiliate link.
+ * True only for a plain HTTPS URL on an official Trip.com host, with no embedded
+ * credentials and no non-default port. The last gate before any URL is handed to a
+ * browser or written to the log, so a bug upstream can never turn this into an open
+ * redirect or a credential-leaking / port-scanning target.
  */
-export function generateFlightLink(params?: {
-  origin?: string;
-  destination?: string;
-  departDate?: string;
-  returnDate?: string;
-  ouid?: string;
-  adults?: number;
-  children?: number;
-  infants?: number;
-  cabinClass?: string;
-}): string {
-  const deepLinkId = TRIP_COM_CONFIG.deepLinks.flights;
-  const url = new URL(`${BASE_URL}/${deepLinkId}`);
-  url.searchParams.set("allianceId", TRIP_COM_CONFIG.allianceId);
-  url.searchParams.set("sid", TRIP_COM_CONFIG.sid);
-
-  if (params?.ouid) url.searchParams.set("ouid", params.ouid);
-  if (params?.origin) url.searchParams.set("dcity", params.origin);
-  if (params?.destination) url.searchParams.set("acity", params.destination);
-  if (params?.departDate) url.searchParams.set("ddate", params.departDate);
-  if (params?.returnDate) url.searchParams.set("rdate", params.returnDate);
-  if (params?.adults && params.adults > 1) url.searchParams.set("adult", String(params.adults));
-  if (params?.children && params.children > 0) url.searchParams.set("child", String(params.children));
-  if (params?.infants && params.infants > 0) url.searchParams.set("infant", String(params.infants));
-  if (params?.cabinClass && params.cabinClass !== 'economy') {
-    const cabinMap: Record<string, string> = { premiumEconomy: 'PremiumEconomy', business: 'Business', first: 'First' };
-    const mappedCabin = cabinMap[params.cabinClass];
-    if (mappedCabin) url.searchParams.set("cabin", mappedCabin);
+export function isAllowedTripUrl(raw: string): boolean {
+  let parsed: URL;
+  try {
+    parsed = new URL(raw);
+  } catch {
+    return false;
   }
-
-  return url.toString();
+  if (parsed.protocol !== "https:") return false;
+  if (parsed.username !== "" || parsed.password !== "") return false; // no user:pass@host
+  if (parsed.port !== "" && parsed.port !== "443") return false; // only the default HTTPS port
+  return ALLOWED_TRIP_HOSTS.has(parsed.hostname.toLowerCase());
 }
 
 /**
- * Generate a Trip.com hotel search affiliate link.
+ * The closed set of redirect sources. The browser may pick which one, but nothing
+ * else about a redirect is caller-controlled.
  */
-export function generateHotelLink(params?: {
-  city?: string;
-  checkIn?: string;
-  checkOut?: string;
-  ouid?: string;
-  rooms?: number;
-  adults?: number;
-  children?: number;
-}): string {
-  const deepLinkId = TRIP_COM_CONFIG.deepLinks.hotels;
-  const url = new URL(`${BASE_URL}/${deepLinkId}`);
-  url.searchParams.set("allianceId", TRIP_COM_CONFIG.allianceId);
-  url.searchParams.set("sid", TRIP_COM_CONFIG.sid);
+export type TripRedirectSource = "flight_search" | "hotel_search" | "tour_flight" | "tour_hotel";
 
-  if (params?.ouid) url.searchParams.set("ouid", params.ouid);
-  if (params?.city) url.searchParams.set("city", params.city);
-  if (params?.checkIn) url.searchParams.set("checkin", params.checkIn);
-  if (params?.checkOut) url.searchParams.set("checkout", params.checkOut);
-  if (params?.rooms && params.rooms > 1) url.searchParams.set("rooms", String(params.rooms));
-  if (params?.adults && params.adults > 0) url.searchParams.set("adults", String(params.adults));
-  if (params?.children && params.children > 0) url.searchParams.set("children", String(params.children));
-
-  return url.toString();
-}
+/** Every source lands on the approved homepage entry (Phase 1 is homepage-only). */
+const SOURCE_PLATFORM: Record<TripRedirectSource, "trip_homepage"> = {
+  flight_search: "trip_homepage",
+  hotel_search: "trip_homepage",
+  tour_flight: "trip_homepage",
+  tour_hotel: "trip_homepage",
+};
 
 /**
- * Generate a Trip.com homepage affiliate link.
+ * Record ONE anonymous redirect-telemetry row: that a redirect from `source` was
+ * requested. This is NOT a confirmed human click and NOT commission truth — earnings
+ * truth is the Trip.com Affiliate report. Anonymity is structural: no userId, IP or
+ * User-Agent is accepted, so none can be stored (those columns are written null). The
+ * closed `source` is stored in referrerPage (a server-set enum value, never a
+ * browser-supplied string); platform is always trip_homepage — where the customer
+ * actually lands.
+ *
+ * Best-effort: any failure is swallowed so it can never block the redirect.
  */
-export function generateHomepageLink(ouid?: string): string {
-  const deepLinkId = TRIP_COM_CONFIG.deepLinks.homepage;
-  const url = new URL(`${BASE_URL}/${deepLinkId}`);
-  url.searchParams.set("allianceId", TRIP_COM_CONFIG.allianceId);
-  url.searchParams.set("sid", TRIP_COM_CONFIG.sid);
-
-  if (ouid) url.searchParams.set("ouid", ouid);
-
-  return url.toString();
-}
-
-/**
- * Track an affiliate click by persisting it to the database.
- */
-export async function trackAffiliateClick(data: {
-  userId?: number;
-  platform: "trip_flights" | "trip_hotels" | "trip_homepage";
-  targetUrl: string;
-  referrerPage?: string;
-  tourId?: number;
-  ipAddress?: string;
-  userAgent?: string;
-}): Promise<void> {
+export async function recordRedirectTelemetry(source: TripRedirectSource): Promise<void> {
   try {
     await createAffiliateClick({
-      userId: data.userId ?? null,
-      platform: data.platform,
-      targetUrl: data.targetUrl,
-      referrerPage: data.referrerPage ?? null,
-      tourId: data.tourId ?? null,
-      ipAddress: data.ipAddress ?? null,
-      userAgent: data.userAgent ?? null,
+      userId: null,
+      platform: SOURCE_PLATFORM[source],
+      targetUrl: APPROVED_HOMEPAGE_ENTRY,
+      referrerPage: source,
+      tourId: null,
+      ipAddress: null,
+      userAgent: null,
     });
   } catch (err) {
-    // Non-critical: log but don't throw
-    console.error("[AffiliateClick] Failed to track click:", err);
+    console.error("[TripRedirect] telemetry write failed (ignored):", err);
   }
 }
 
