@@ -2,13 +2,14 @@
  * TourDetailPeony / PriceComparisonWidget.tsx
  *
  * Price Comparison Widget — shows breakdown of self-book vs package price
- * with Trip.com affiliate click-tracking links.
+ * with Trip.com affiliate redirect-request links.
  * Extracted from TourDetailPeony.tsx v2 Wave 2 Module 2.8.
  */
 
 import React from "react";
 import { ExternalLink } from "lucide-react";
 import { trpc } from "@/lib/trpc";
+import { openTripClickout } from "@/lib/tripClickout";
 import { useLocale } from "@/contexts/LocaleContext";
 import type { getThemeColorByDestination } from "./helpers";
 
@@ -22,29 +23,17 @@ export const PriceComparisonWidget = ({
   themeColor: ReturnType<typeof getThemeColorByDestination>;
 }) => {
   const { t, formatPrice } = useLocale();
-  const utils = trpc.useUtils();
-  const trackClickMutation = trpc.affiliate.trackClick.useMutation();
   const { data: comparison, isLoading } = trpc.affiliate.getPriceComparison.useQuery({ tourId });
   if (isLoading || !comparison) return null;
   const selfBookTotal = comparison.totalSelfBook ?? 0;
   const savings = selfBookTotal > 0 ? selfBookTotal - tourPrice : 0;
   const savingsPct = selfBookTotal > 0 ? Math.round((savings / selfBookTotal) * 100) : 0;
 
-  const handleFlightClick = async () => {
-    try {
-      const result = await utils.affiliate.generateAffiliateLink.fetch({ type: "flights" });
-      await trackClickMutation.mutateAsync({ platform: "trip_flights", targetUrl: result.url, referrerPage: `/tours/${tourId}` });
-      window.open(result.url, "_blank");
-    } catch {}
-  };
-
-  const handleHotelClick = async () => {
-    try {
-      const result = await utils.affiliate.generateAffiliateLink.fetch({ type: "hotels" });
-      await trackClickMutation.mutateAsync({ platform: "trip_hotels", targetUrl: result.url, referrerPage: `/tours/${tourId}` });
-      window.open(result.url, "_blank");
-    } catch {}
-  };
+  // Phase 1 homepage-only clickout: both buttons open the first-party redirect
+  // endpoint (302 to the approved Trip.com entry) synchronously — no await, no
+  // placeholder popup. The notice below the buttons says conditions don't carry.
+  const handleFlightClick = () => openTripClickout('tour_flight');
+  const handleHotelClick = () => openTripClickout('tour_hotel');
 
   return (
     <div className="mt-10 bg-gray-50 rounded-2xl border border-gray-200 p-6">
@@ -72,6 +61,9 @@ export const PriceComparisonWidget = ({
           </div>
         ))}
       </div>
+      {/* Persistent clickout notice: the search links leave to Trip.com and do NOT
+          carry this tour's dates or cities — always visible, not a missable toast. */}
+      <p className="text-xs text-gray-500 mb-5 text-center">{t('tourDetail.priceComparison.redirectNotice')}</p>
       {/* v80.24: was hardcoding `NT$` and `.toLocaleString()` — now uses
           formatPrice so the comparison widget honours the user's selected
           currency just like the rest of the page. */}

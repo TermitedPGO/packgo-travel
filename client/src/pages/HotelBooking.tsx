@@ -1,6 +1,6 @@
 import { lazy, Suspense, useState, useRef, useEffect } from "react";
 import { useLocale } from "@/contexts/LocaleContext";
-import { trackAffiliateClick } from "@/lib/analytics";
+import { openTripClickout } from "@/lib/tripClickout";
 import Header from "@/components/Header";
 import Footer from "@/components/Footer";
 import SEO from "@/components/SEO";
@@ -10,12 +10,10 @@ import { Link } from "wouter";
 import {
   Hotel, Star, Wifi, Car, Utensils, Dumbbell, Shield, Headphones,
   ArrowRight, MapPin, CheckCircle, Building2, Palmtree, Waves, Flame,
-  ExternalLink, Search, Users
+  ExternalLink, Search, Users, MessageCircle
 } from "lucide-react";
 // Lazy: AITravelAdvisorDialog pulls in streamdown + Shiki (~600KB+).
 const AITravelAdvisorDialog = lazy(() => import("@/components/AITravelAdvisorDialog"));
-import { trpc } from "@/lib/trpc";
-import { toast } from "sonner";
 
 export default function HotelBooking() {
   const { t } = useLocale();
@@ -26,7 +24,6 @@ export default function HotelBooking() {
   const [city, setCity] = useState("");
   const [checkIn, setCheckIn] = useState("");
   const [checkOut, setCheckOut] = useState("");
-  const [isSearching, setIsSearching] = useState(false);
 
   // Room & guest picker
   const [rooms, setRooms] = useState(1);
@@ -34,9 +31,6 @@ export default function HotelBooking() {
   const [hotelChildren, setHotelChildren] = useState(0);
   const [showRoomPicker, setShowRoomPicker] = useState(false);
   const roomPickerRef = useRef<HTMLDivElement>(null);
-
-  const utils = trpc.useUtils();
-  const trackClickMutation = trpc.affiliate.trackClick.useMutation();
 
   // Close picker on outside click
   useEffect(() => {
@@ -54,51 +48,16 @@ export default function HotelBooking() {
     setAdvisorOpen(true);
   };
 
-  const handleSearchHotels = async () => {
-    setIsSearching(true);
-    try {
-      const result = await utils.affiliate.generateAffiliateLink.fetch({
-        type: "hotels",
-        city: city || undefined,
-        checkIn: checkIn || undefined,
-        checkOut: checkOut || undefined,
-        rooms,
-        hotelAdults,
-        hotelChildren,
-      });
-      const url = result.url;
-      await trackClickMutation.mutateAsync({
-        platform: "trip_hotels",
-        targetUrl: url,
-        referrerPage: "/hotel-booking",
-      });
-      trackAffiliateClick({ platform: 'trip.com', linkType: 'hotel', destination: city || undefined, searchQuery: city || '' });
-      toast.info(t('hotelBooking.page.toastSearching'));
-      window.open(url, "_blank");
-    } catch (err) {
-      toast.error(t('hotelBooking.page.toastError'));
-    } finally {
-      setIsSearching(false);
-    }
-  };
+  // Phase 1 is homepage-only clickout: open the first-party redirect endpoint, which
+  // 302s to the approved Trip.com entry. Search-box fields are NOT sent (the persistent
+  // notice next to the button tells the customer to re-enter them on Trip.com).
+  const handleSearchHotels = () => openTripClickout('hotel_search');
 
-  const handleDestinationClick = async (dest: { city: string; country: string }) => {
-    try {
-      const result = await utils.affiliate.generateAffiliateLink.fetch({
-        type: "hotels",
-        city: dest.city,
-      });
-      await trackClickMutation.mutateAsync({
-        platform: "trip_hotels",
-        targetUrl: result.url,
-        referrerPage: "/hotel-booking",
-      });
-      trackAffiliateClick({ platform: 'trip.com', linkType: 'hotel', destination: dest.city, searchQuery: `${dest.country}${dest.city}` });
-      toast.info(t('hotelBooking.page.toastSearching'));
-      window.open(result.url, "_blank");
-    } catch {
-      openAdvisor(`${dest.country} ${dest.city}`);
-    }
+  // A destination card can't be carried to a homepage-only clickout, so it opens the
+  // PACK&GO advisor (which can actually help with that city) instead of pretending
+  // Trip.com will pre-fill it.
+  const handleDestinationClick = (dest: { city: string; country: string }) => {
+    openAdvisor(`${dest.country} ${dest.city}`);
   };
 
   const roomSummary = `${rooms} ${t('hero.search.hotel.room')}, ${hotelAdults + hotelChildren} ${t('hero.search.hotel.guests')}`;
@@ -254,17 +213,19 @@ export default function HotelBooking() {
                 <div className="w-full md:w-40 flex-shrink-0">
                   <Button
                     onClick={handleSearchHotels}
-                    disabled={isSearching}
                     className="w-full h-12 bg-black hover:bg-gray-900 text-white rounded-lg font-bold shadow-md transition-all hover:shadow-lg flex items-center justify-center gap-2"
                   >
                     <Search className="h-4 w-4" />
-                    {isSearching ? t('hotelBooking.page.searching') : t('hotelBooking.page.searchBtn')}
+                    {t('hotelBooking.page.searchBtn')}
                     <ExternalLink className="h-3.5 w-3.5 opacity-70" />
                   </Button>
                 </div>
               </div>
 
-              <p className="text-center text-xs text-gray-400">{t('hotelBooking.page.redirectNote')}</p>
+              {/* Persistent clickout notice (§ homepage-only): the button leaves to
+                  Trip.com and does NOT carry the fields above. Always visible next to
+                  the button — not a toast the customer can miss after redirecting. */}
+              <p className="text-center text-xs text-gray-500">{t('hotelBooking.page.redirectNotice')}</p>
             </div>
           </div>
         </div>
@@ -394,7 +355,8 @@ export default function HotelBooking() {
                   </div>
                 </div>
                 <div className="flex items-center justify-end">
-                  <ExternalLink className="h-4 w-4 text-gray-400 group-hover:text-black transition-colors" />
+                  {/* Advisor dialog, not an external site — icon must not imply leaving. */}
+                  <MessageCircle className="h-4 w-4 text-gray-400 group-hover:text-black transition-colors" />
                 </div>
               </button>
             ))}

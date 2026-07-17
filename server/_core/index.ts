@@ -24,6 +24,7 @@ import { tourImageUploadRouter } from "../tourImageUpload";
 import { pdfUploadRouter } from "../pdfUpload";
 import { progressRouter } from "../progressRouter";
 import { aiChatStreamRouter } from "../aiChatStreamRouter";
+import { mountTripRedirect } from "../services/tripRedirect";
 import { generalImageUploadRouter } from "../generalImageUpload";
 import { initializeGoogleAuth } from "../googleAuth";
 import { initializeGmailOAuth } from "../gmailOAuth";
@@ -99,6 +100,15 @@ async function startServer() {
   // was being served uncompressed; gzip cuts it ~70% and fixes LCP on slow
   // connections. Added before any route handlers so all responses benefit.
   app.use(compression());
+
+  // Trip.com affiliate clickout (Phase 1: homepage-only): GET /go/trip/:source,
+  // closed source enum → 302 to the approved entry, telemetry fire-and-forget.
+  // Mounted deliberately BEFORE the access logger and body parsers: a /go/trip
+  // request must never reach pino-http (its raw URL/query — where an attacker can
+  // plant PII — would land in access logs) and must never be body-parsed (a
+  // malformed JSON body would 400 before the handler). The route itself reads
+  // nothing but the path param.
+  mountTripRedirect(app);
 
   // v2 Wave 1 Module 1.2 — correlation ID + structured request logging.
   // Order matters:
