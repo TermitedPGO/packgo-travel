@@ -80,9 +80,8 @@ export default function CustomerList({
                 {c.initials}
               </div>
               {/* Avatar red has ONE meaning: unseen inbound customer mail.
-                  Agent drafts/messages stay in their dedicated draft panel and
-                  global inbox; rendering both as red dots made a read row look
-                  permanently unread. */}
+                  Rendering the agent-message count in the same spot made a
+                  read row look permanently unread. */}
               {c.unread && !c.blocked && (
                 <span className="absolute -top-0.5 -right-0.5 w-2 h-2 bg-red-500 rounded-full" />
               )}
@@ -91,7 +90,7 @@ export default function CustomerList({
               <div className={`text-[13px] min-w-0 flex items-center gap-1.5 ${c.unread && !c.blocked ? "font-semibold" : "font-medium"}`}>
                 <span
                   data-customer-row-name
-                  className="min-w-0 flex-1 truncate"
+                  className="min-w-0 truncate"
                   title={c.name}
                 >
                   {c.name}

@@ -30,7 +30,7 @@ describe("A — 來訊未讀紅點 (CustomerList)", () => {
   })
 
   it("avatar red dot has one meaning only: inbound unread, never agent-message backlog", () => {
-    expect(customerList).not.toMatch(/c\.notifs\s*>\s*0/)
+    expect(customerList).not.toContain("notifs")
   })
 })
 
