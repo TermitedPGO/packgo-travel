@@ -30,8 +30,7 @@
  *   DATABASE_URL=... BACKUP_R2_BUCKET=... node scripts/backup-tidb-to-r2.mjs
  */
 
-import { exec } from "node:child_process";
-import { promisify } from "node:util";
+import { spawn } from "node:child_process";
 import { readFile, unlink, stat } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -39,8 +38,6 @@ import { createGzip } from "node:zlib";
 import { createReadStream, createWriteStream } from "node:fs";
 import { pipeline } from "node:stream/promises";
 import { S3Client, PutObjectCommand } from "@aws-sdk/client-s3";
-
-const execAsync = promisify(exec);
 
 const REQUIRED_ENV = [
   "DATABASE_URL",
@@ -104,31 +101,46 @@ async function runMysqldump(connection, outputPath) {
     `--host=${host}`,
     `--port=${port}`,
     `--user=${user}`,
-    `--password=${password}`,
     database,
   ];
 
-  const cmd = `${mysqldumpBin} ${args.map((a) => `"${a.replace(/"/g, '\\"')}"`).join(" ")}`;
-
   console.log("[backup] starting mysqldump...");
   const startedAt = Date.now();
-  const child = exec(cmd, { maxBuffer: 1024 * 1024 * 1024 }); // 1GB buffer
+  // spawn + stream:dump 已超過 2GB,exec 的 maxBuffer 會把子行程砍成 exit null。
+  // 密碼走 MYSQL_PWD 環境變數:不進 argv(一般 ps 看不到;程序環境檢視仍可見,
+  // MySQL 官方視 MYSQL_PWD 為 insecure——此處取「不落 argv/shell 字串」的折衷)。
+  const child = spawn(mysqldumpBin, args, {
+    env: { ...process.env, MYSQL_PWD: password },
+  });
 
   const write = createWriteStream(outputPath);
-  child.stdout?.pipe(write);
+  child.stdout.pipe(write);
 
   let stderr = "";
   child.stderr?.on("data", (d) => {
     stderr += d.toString();
   });
 
+  // 完成條件:子行程 exit 0 且 stdout→檔案的串流 flush 完畢,兩者缺一不可,
+  // 否則截斷的 dump 可能被當成功送去 gzip/上傳。
   await new Promise((resolve, reject) => {
+    let exited = false;
+    let finished = false;
+    const maybeDone = () => {
+      if (exited && finished) resolve();
+    };
+    child.on("error", reject); // binary 不存在/無執行權限等 spawn 失敗
     child.on("close", (code) => {
       if (code !== 0) {
         reject(new Error(`mysqldump exit ${code}: ${stderr}`));
       } else {
-        resolve();
+        exited = true;
+        maybeDone();
       }
+    });
+    write.on("finish", () => {
+      finished = true;
+      maybeDone();
     });
     write.on("error", reject);
   });
@@ -197,6 +209,9 @@ async function main() {
   const tmpGz = join(tmpdir(), `packgo-${ts}.sql.gz`);
   const r2Key = `daily/${ts.slice(0, 10)}/packgo-${ts}.sql.gz`;
 
+  // process.exit 不可放在 try/catch 內:同步終止會跳過 finally 的暫存清理,
+  // 每次執行漏 ~2.5GB 到 tmpdir,最終吃光磁碟。先清理、後退出。
+  let exitCode = 0;
   try {
     const conn = parseMySqlUrl(process.env.DATABASE_URL);
     await runMysqldump(conn, tmpDump);
@@ -204,11 +219,10 @@ async function main() {
     await uploadToR2(tmpGz, r2Key);
 
     console.log(`[backup] SUCCESS — r2://${process.env.BACKUP_R2_BUCKET}/${r2Key}`);
-    process.exit(0);
   } catch (err) {
     console.error("[backup] FAILED:", err.message);
     if (err.stack) console.error(err.stack);
-    process.exit(1);
+    exitCode = 1;
   } finally {
     // best-effort cleanup
     await Promise.allSettled([
@@ -216,6 +230,7 @@ async function main() {
       unlink(tmpGz).catch(() => {}),
     ]);
   }
+  process.exit(exitCode);
 }
 
 main();
