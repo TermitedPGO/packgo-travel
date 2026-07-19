@@ -255,6 +255,16 @@ async function hydrateMessageById(
         { err: attachErr, messageId: id },
         "[gmail] failed to parse attachments — continuing with body only"
       );
+      // Codex 14:07 P1-3 — a whole-hydration failure must NOT read as "no
+      // attachments": parseMessage defaults attachments=[], so the reply
+      // gate (and the auto-send gate behind it) would treat an attachment-
+      // bearing email as attachment-free. Rebuild the existence evidence
+      // from the payload (local part walk, no API call) as not_processed
+      // sentinels → gate force-escalates, auto-send dies.
+      summary.attachments = buildHydrationFailureSentinels(
+        full.data.payload,
+        attachErr
+      );
     }
     return summary;
   } catch (e) {
@@ -528,14 +538,62 @@ function parseMessage(msg: any): GmailMessageSummary {
 }
 
 /**
- * Walk the Gmail message payload tree, find every attachment part
- * (parts with `body.attachmentId` and non-empty `filename`), fetch the
- * actual bytes via gmail.users.messages.attachments.get, run each through
- * `parseAttachment` from _core/attachmentParser.ts.
+ * Codex 14:07 P1-3 — sentinels for a whole-hydration failure. The part walk
+ * is local (no API call), so even when fetching/parsing died we can still
+ * report WHICH attachments exist, as not_processed entries the reply gate
+ * escalates on. If even the walk fails, return a single generic sentinel:
+ * the email MAY carry attachments we know nothing about — fail closed.
+ * Exported for tests only.
+ */
+export function buildHydrationFailureSentinels(
+  payload: any,
+  err: unknown
+): ParsedAttachment[] {
+  const reason = `attachment hydration failed before parsing: ${
+    err instanceof Error ? err.message : String(err)
+  }`.slice(0, 200);
+  try {
+    // AttachmentPartRef covers both attachmentId-型 and inline body.data
+    // parts, so inline attachments keep their existence evidence too
+    // (Codex 16:02 P1-1).
+    const parts: AttachmentPartRef[] = [];
+    collectAttachmentParts(payload, parts);
+    return parts.map((p) => ({
+      filename: p.filename,
+      mimeType: p.mimeType,
+      kind: "unknown",
+      sizeBytes: p.sizeHint,
+      text: "",
+      parseStatus: "not_processed",
+      parseError: reason,
+    }));
+  } catch {
+    return [
+      {
+        filename: "(附件清單無法取得)",
+        mimeType: "application/octet-stream",
+        kind: "unknown",
+        sizeBytes: 0,
+        text: "",
+        parseStatus: "not_processed",
+        parseError: reason,
+      },
+    ];
+  }
+}
+
+/**
+ * Walk the Gmail message payload tree, find every semantic attachment part
+ * (see collectAttachmentParts — identity by filename / Content-Disposition,
+ * NOT by attachmentId), fetch the bytes (attachments.get or inline
+ * body.data), run each through `parseAttachment` from
+ * _core/attachmentParser.ts. Byte-less refs (zero-byte attachments) come
+ * back as parseStatus "empty" so the reply gate still escalates.
  *
- * Returns up to MAX_ATTACHMENTS_PER_MESSAGE entries. Skips inline-image
- * parts (typically embedded in HTML body, filename starts with "image-")
- * unless they're explicitly named — those are presentation, not content.
+ * PARSES up to MAX_ATTACHMENTS_PER_MESSAGE entries; parts beyond the cap
+ * are still returned as not_processed sentinels (Codex 14:07 P1-3 — the
+ * 6th+ attachment used to vanish with only a log line, so the reply gate
+ * had no idea an unread attachment existed).
  */
 async function fetchAndParseAttachments(
   gmail: ReturnType<typeof buildGmailClient>,
@@ -544,19 +602,19 @@ async function fetchAndParseAttachments(
 ): Promise<ParsedAttachment[]> {
   if (!payload) return [];
 
-  // Collect all parts that carry an attachment
-  const parts: Array<{ filename: string; mimeType: string; attachmentId: string; sizeHint: number }> = [];
+  // Collect all parts that carry an attachment (attachmentId-型 + inline)
+  const parts: AttachmentPartRef[] = [];
   collectAttachmentParts(payload, parts);
 
   if (parts.length === 0) return [];
 
-  // Apply per-message cap (defense-in-depth)
+  // Apply per-message parse cap (defense-in-depth)
   const capped = parts.slice(0, MAX_ATTACHMENTS_PER_MESSAGE);
-  const dropped = parts.length - capped.length;
-  if (dropped > 0) {
+  const droppedParts = parts.slice(MAX_ATTACHMENTS_PER_MESSAGE);
+  if (droppedParts.length > 0) {
     log.info(
-      { messageId, dropped, kept: capped.length },
-      "[gmail] capped attachments per message"
+      { messageId, dropped: droppedParts.length, kept: capped.length },
+      "[gmail] capped attachments per message — overflow kept as not_processed sentinels"
     );
   }
 
@@ -567,12 +625,17 @@ async function fetchAndParseAttachments(
   const out: ParsedAttachment[] = [];
   for (const p of capped) {
     try {
-      const attResp = await gmail.users.messages.attachments.get({
-        userId: "me",
-        messageId,
-        id: p.attachmentId,
-      });
-      const dataB64 = attResp.data.data;
+      // Codex 16:02 P1-1 — inline parts already carry their bytes in
+      // body.data; only attachmentId-型 parts need the extra API fetch.
+      let dataB64: string | null | undefined = p.inlineData;
+      if (p.attachmentId) {
+        const attResp = await gmail.users.messages.attachments.get({
+          userId: "me",
+          messageId,
+          id: p.attachmentId,
+        });
+        dataB64 = attResp.data.data;
+      }
       if (!dataB64) {
         out.push({
           filename: p.filename,
@@ -607,6 +670,20 @@ async function fetchAndParseAttachments(
       });
     }
   }
+  // Codex 14:07 P1-3 — cap overflow keeps existence evidence: each dropped
+  // part becomes a not_processed sentinel so the reply gate knows an unread
+  // attachment exists and force-escalates instead of auto-sending.
+  for (const p of droppedParts) {
+    out.push({
+      filename: p.filename,
+      mimeType: p.mimeType,
+      kind: "unknown",
+      sizeBytes: p.sizeHint,
+      text: "",
+      parseStatus: "not_processed",
+      parseError: `over per-message cap of ${MAX_ATTACHMENTS_PER_MESSAGE} attachments - not parsed`,
+    });
+  }
   return out;
 }
 
@@ -640,7 +717,7 @@ export async function fetchRawAttachments(
     id: messageId,
     format: "full",
   });
-  const parts: Array<{ filename: string; mimeType: string; attachmentId: string; sizeHint: number }> = [];
+  const parts: AttachmentPartRef[] = [];
   collectAttachmentParts(full.data.payload, parts);
   if (parts.length === 0) return [];
 
@@ -655,12 +732,17 @@ export async function fetchRawAttachments(
       continue;
     }
     try {
-      const attResp = await gmail.users.messages.attachments.get({
-        userId: "me",
-        messageId,
-        id: p.attachmentId,
-      });
-      const dataB64 = attResp.data.data;
+      // Codex 16:02 P1-1 — inline body.data parts supported on the raw
+      // receipt path too, mirroring fetchAndParseAttachments.
+      let dataB64: string | null | undefined = p.inlineData;
+      if (p.attachmentId) {
+        const attResp = await gmail.users.messages.attachments.get({
+          userId: "me",
+          messageId,
+          id: p.attachmentId,
+        });
+        dataB64 = attResp.data.data;
+      }
       if (!dataB64) continue;
       const bytes = Buffer.from(
         dataB64.replace(/-/g, "+").replace(/_/g, "/"),
@@ -679,20 +761,103 @@ export async function fetchRawAttachments(
   return out;
 }
 
-function collectAttachmentParts(
-  part: any,
-  out: Array<{ filename: string; mimeType: string; attachmentId: string; sizeHint: number }>
-): void {
+/** One attachment-bearing MIME part. Bytes live behind attachmentId
+ *  (externalized, fetched via attachments.get) OR inline in body.data —
+ *  or NOWHERE (zero-byte attachment): the ref still exists so the reply
+ *  gate sees the attachment's existence; hydration maps a byte-less ref
+ *  to parseStatus "empty" (Codex 17:40 P1-1: bytes location is not
+ *  attachment identity). */
+type AttachmentPartRef = {
+  filename: string;
+  mimeType: string;
+  /** Set when bytes must be fetched via messages.attachments.get. */
+  attachmentId?: string;
+  /** Set when Gmail inlined the full content (base64url) in body.data. */
+  inlineData?: string;
+  sizeHint: number;
+};
+
+/** Case-insensitive lookup of a MIME header on a message part. */
+function partHeader(part: any, name: string): string {
+  const list = Array.isArray(part?.headers) ? part.headers : [];
+  const lower = name.toLowerCase();
+  for (const h of list) {
+    if (typeof h?.name === "string" && h.name.toLowerCase() === lower) {
+      return String(h.value ?? "");
+    }
+  }
+  return "";
+}
+
+/** Nameless parts with these mime types are protocol furniture (a meeting
+ *  invite's calendar body, S/MIME + PGP signatures) — never customer
+ *  content we failed to read; escalating them would flag every invite.
+ *  A NAMED one (someone deliberately attached "itinerary.ics") still
+ *  counts as an attachment. */
+const NAMELESS_PROTOCOL_MIMES: ReadonlySet<string> = new Set([
+  "text/calendar",
+  "application/ics",
+  "application/pkcs7-signature",
+  "application/pkcs7-mime",
+  "application/x-pkcs7-signature",
+  "application/pgp-signature",
+  "application/pgp-keys",
+]);
+
+function collectAttachmentParts(part: any, out: AttachmentPartRef[]): void {
   if (!part) return;
-  // A real attachment has filename + attachmentId. Inline parts (body data)
-  // are NOT attachments — they're handled by extractBody.
-  if (part.filename && part.body?.attachmentId) {
-    out.push({
-      filename: part.filename,
-      mimeType: part.mimeType || "application/octet-stream",
-      attachmentId: part.body.attachmentId,
-      sizeHint: Number(part.body.size ?? 0),
-    });
+  // Gmail API semantics (Codex 17:40 P1-1): `filename` is only present when
+  // the part IS an attachment, and `body.attachmentId` only says WHERE the
+  // bytes live (externalized vs inline body.data) — it is NOT attachment
+  // identity. Treating attachmentId as identity both LOSES attachments (a
+  // named zero-byte part has neither attachmentId nor data → vanished, and
+  // the reply gate no-ops on attachments=[]) and INVENTS them (an
+  // externalized text/plain BODY carries an attachmentId → the email's own
+  // body became an "attachment").
+  //
+  //   identity: non-empty `filename`, OR Content-Disposition: attachment
+  //             (case-insensitive) — minus nameless protocol parts.
+  //   bytes:    attachmentId if present, else body.data (may be "" / absent
+  //             — the ref survives byte-less as existence evidence, and
+  //             hydration yields parseStatus "empty" → gate escalates).
+  //
+  // Nameless parts WITHOUT an attachment disposition stay out: CID inline
+  // logos, Content-Disposition: inline media, externalized text/plain and
+  // text/html bodies. Nameless parts WITH an attachment disposition are
+  // real "noname" attachments (octet/text/office/PDF/image…) → collected.
+  const mimeType = part.mimeType || "application/octet-stream";
+  const mt = mimeType.toLowerCase();
+  // Identity uses the RAW filename: Gmail sets filename:"" on every
+  // non-attachment part, so "" carries no identity — but a sender-set
+  // whitespace-only name (Content-Type name="   ") means a part WAS
+  // attached (red-team v4). Display falls back for non-printable names.
+  const rawName = typeof part.filename === "string" ? part.filename : "";
+  const hasName = rawName.length > 0;
+  const hasPrintableName = rawName.trim().length > 0;
+  // Some buggy mailers quote the whole disposition token ('"attachment"');
+  // strip quotes before comparing (red-team v4).
+  const disposition = partHeader(part, "Content-Disposition")
+    .split(";")[0]
+    .trim()
+    .replace(/^"+|"+$/g, "")
+    .trim()
+    .toLowerCase();
+  const isSemanticAttachment =
+    (hasName || disposition === "attachment") &&
+    !(!hasPrintableName && NAMELESS_PROTOCOL_MIMES.has(mt));
+  if (isSemanticAttachment) {
+    const ref: AttachmentPartRef = {
+      filename: hasPrintableName ? rawName : `(未命名附件 ${mt})`,
+      mimeType,
+      sizeHint: Number(part.body?.size ?? 0),
+    };
+    if (part.body?.attachmentId) {
+      ref.attachmentId = part.body.attachmentId;
+    } else if (typeof part.body?.data === "string") {
+      // "" is kept deliberately — a zero-byte attachment still EXISTS.
+      ref.inlineData = part.body.data;
+    }
+    out.push(ref);
   }
   if (Array.isArray(part.parts)) {
     for (const sub of part.parts) collectAttachmentParts(sub, out);

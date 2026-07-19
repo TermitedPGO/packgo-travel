@@ -254,22 +254,27 @@ export function trackVisaPurchase(params: {
   });
 }
 
-// ─── Affiliate / Flight / Hotel ──────────────────────────────────────────────
+// ─── Affiliate / Trip.com clickout ───────────────────────────────────────────
+/** The closed set of clickout sources — mirrors the server /go/trip/:source enum. */
+export type TripRedirectSource = "flight_search" | "hotel_search" | "tour_flight" | "tour_hotel";
+
+const TRIP_REDIRECT_SOURCES: ReadonlySet<string> = new Set([
+  "flight_search", "hotel_search", "tour_flight", "tour_hotel",
+]);
+
 /**
- * Fired when a user clicks an affiliate link (Trip.com flight or hotel).
+ * Fired when a customer clicks a Trip.com clickout button. GA receives ONLY the
+ * closed source enum and a fixed destination marker — never any free-text route,
+ * city, name or other user input (that would leak PII to a third party). The enum
+ * is re-checked at runtime so even a type-cast caller cannot push an arbitrary
+ * string to GA (it collapses to "unknown"). Phase 1 is homepage-only, so the
+ * destination is always `homepage_redirect`.
  */
-export function trackAffiliateClick(params: {
-  platform: string;
-  linkType: "flight" | "hotel" | "tour";
-  destination?: string;
-  searchQuery?: string;
-}) {
+export function trackAffiliateClick(source: TripRedirectSource) {
   gtag("event", "affiliate_click", {
     event_category: "affiliate",
-    platform: params.platform,
-    link_type: params.linkType,
-    destination: params.destination ?? "",
-    search_query: params.searchQuery ?? "",
+    source: TRIP_REDIRECT_SOURCES.has(source) ? source : "unknown",
+    destination: "homepage_redirect",
   });
 }
 

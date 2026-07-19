@@ -48,8 +48,33 @@ export function RecognitionCard() {
 
   const { items, total, count } = foldDepartedPending(deferred.data as any, today);
 
-  // 0 筆(含 loading / error)不佔位 —— 空態與讀取失敗由 WorkColumn 的其它卡承載
-  if (count === 0) return null;
+  // 1A0a U7:讀取失敗且無任何快取值 → 顯性「無法核實」,不再靜默消失。
+  if (deferred.isError && deferred.data === undefined) {
+    return (
+      <div className="overflow-hidden rounded-xl border border-gray-200 bg-white">
+        <div className="px-4 py-4 text-center text-xs text-gray-400">
+          {t("financeCockpit.work.recogLoadError")}
+        </div>
+      </div>
+    );
+  }
+
+  // cached refetch 失敗 = stale(顯舊列+標記,Codex 7-18 P1-6/P2-1:stale 判定在
+  // count===0 return 之前,避免 stale 訊號被空態吞掉)
+  const stale = deferred.isError && deferred.data !== undefined;
+
+  // 真零且非 stale(有資料且 0 筆)或首載中不佔位 —— 空態由 WorkColumn 的 allClear 承載
+  if (count === 0 && !stale) return null;
+  // stale 但本頁 0 筆:顯最小 stale 提示卡(不靜默消失)
+  if (count === 0 && stale) {
+    return (
+      <div className="overflow-hidden rounded-xl border border-gray-200 bg-white">
+        <div className="px-4 py-4 text-center text-xs text-amber-700">
+          {t("financeCockpit.truth.staleHint")}
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="overflow-hidden rounded-xl border border-gray-200 bg-white">
@@ -58,7 +83,9 @@ export function RecognitionCard() {
           <Check className="h-3.5 w-3.5 text-gray-400" />
           {t("financeCockpit.work.recogCardTitle")}
         </div>
-        <div className="text-[11px] text-gray-500">{t("financeCockpit.work.recogCardMeta")}</div>
+        <div className="text-[11px] text-gray-500">
+          {stale ? t("financeCockpit.truth.staleHint") : t("financeCockpit.work.recogCardMeta")}
+        </div>
       </div>
 
       {items.map((row, i) => (

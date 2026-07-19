@@ -4,6 +4,7 @@ import react from "@vitejs/plugin-react";
 import { sentryVitePlugin } from "@sentry/vite-plugin";
 import fs from "node:fs";
 import path from "node:path";
+import { execSync } from "node:child_process";
 import { defineConfig, type Plugin, type PluginOption, type ViteDevServer } from "vite";
 
 // vite-plugin-manus-runtime was removed during Fly.io migration.
@@ -198,6 +199,26 @@ if (process.env.SENTRY_AUTH_TOKEN && process.env.SENTRY_ORG && process.env.SENTR
 
 export default defineConfig({
   plugins,
+  // 1A0a boot telemetry(plan v4.3 §3.2.9):build 時注入 git sha 作 build marker;
+  // 取不到(非 git 環境)時退 "unknown" —— reportBootOnce payload regex 會拒,
+  // 不會假造換版證明。
+  define: {
+    // `||` 不用 `??`:Docker build 內 ARG GIT_SHA="" 會使 process.env.GIT_SHA 成
+    // 空字串(非 undefined),空字串也必須退到 git rev-parse / "unknown",否則
+    // marker 變 "" 與註解不符。空/未設 → 試 host git → 取不到退 "unknown"
+    // (被 clientBoot payload regex 拒,不污染換版證明)。sanctioned 部署一律由
+    // safe-deploy.mjs 傳驗證過的 40-hex,不走到 fallback。
+    __BUILD_SHA__: JSON.stringify(
+      (process.env.GIT_SHA && process.env.GIT_SHA.trim()) ||
+        (() => {
+          try {
+            return execSync("git rev-parse HEAD", { encoding: "utf8" }).trim();
+          } catch {
+            return "unknown";
+          }
+        })(),
+    ),
+  },
   resolve: {
     alias: {
       "@": path.resolve(import.meta.dirname, "client", "src"),

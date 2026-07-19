@@ -1093,7 +1093,7 @@ export const ENTRIES: RehearsalEntry[] = [
   },
   {
     key: "gmailPipeline.recentInteractionsByProfile",
-    sources: ["server/agents/autonomous/gmailPipeline.ts:1010"],
+    sources: ["server/agents/autonomous/gmailPipeline.ts:1011"],
     cls: "B",
     sql: "SELECT *\nFROM `customerInteractions`\nWHERE `customerInteractions`.`customerProfileId` = ?\nORDER BY `customerInteractions`.`createdAt` DESC\nLIMIT ?",
     sampleParams: [1,1],
@@ -1102,7 +1102,7 @@ export const ENTRIES: RehearsalEntry[] = [
   },
   {
     key: "gmailPipeline.todaysAutoSentCount",
-    sources: ["server/agents/autonomous/gmailPipeline.ts:1438", "server/agents/autonomous/gmailPipeline.ts:1444"],
+    sources: ["server/agents/autonomous/gmailPipeline.ts:1475", "server/agents/autonomous/gmailPipeline.ts:1481"],
     cls: "B",
     sql: "SELECT COUNT(*) AS c\nFROM `interactionOutcomes`\nWHERE `interactionOutcomes`.`agentName` = ?\n  AND `interactionOutcomes`.`actionTaken` = ?\n  AND DATE(`interactionOutcomes`.`createdAt`) = CURDATE()",
     sampleParams: ["x","x"],
@@ -1633,7 +1633,7 @@ export const ENTRIES: RehearsalEntry[] = [
   },
   {
     key: "repurchaseCta.maybeAppendUpgradeCta.bumpInquiryCount",
-    sources: ["server/_core/repurchaseCta.ts:73"],
+    sources: ["server/_core/repurchaseCta.ts:86"],
     cls: "B",
     sql: "update `users` set `inquiryCount` = `inquiryCount` + 1, `lastInquiryAt` = ? where `users`.`id` = ?",
     sampleParams: ["2026-01-01 00:00:00",1],

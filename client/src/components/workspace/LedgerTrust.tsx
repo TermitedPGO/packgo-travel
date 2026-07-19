@@ -27,8 +27,47 @@ export default function LedgerTrust() {
 
   const due = dueForRecognition(pendingQ.data ?? []);
 
+  // 1A0a:讀取失敗且無快取值 → 顯性錯誤,不渲染空清單假象
+  const anyLoadFailed =
+    (reconQ.isError && reconQ.data === undefined) ||
+    (pendingQ.isError && pendingQ.data === undefined) ||
+    (recognizedQ.isError && recognizedQ.data === undefined);
+
+  if (anyLoadFailed) {
+    return (
+      <div className="rounded-xl border border-amber-200 bg-amber-50 p-4 max-w-lg text-xs text-amber-700">
+        {t("workspace.ldgLoadFailed")}
+      </div>
+    );
+  }
+
+  // 1A0a(Codex 7-18 P1-3):初載(無任何快取值)顯載入骨架,不畫空殼(空殼 = 假無資料)。
+  const anyLoadingCold =
+    (reconQ.isLoading && reconQ.data === undefined) ||
+    (pendingQ.isLoading && pendingQ.data === undefined) ||
+    (recognizedQ.isLoading && recognizedQ.data === undefined);
+  if (anyLoadingCold) {
+    return (
+      <div className="max-w-lg animate-pulse space-y-3">
+        <div className="h-24 rounded-xl bg-gray-100" />
+        <div className="h-24 rounded-xl bg-gray-50" />
+      </div>
+    );
+  }
+
+  // cached refetch 失敗 = stale 標記(Codex 7-18 P1-6)
+  const anyStale =
+    (reconQ.isError && reconQ.data !== undefined) ||
+    (pendingQ.isError && pendingQ.data !== undefined) ||
+    (recognizedQ.isError && recognizedQ.data !== undefined);
+
   return (
     <div className="space-y-4">
+      {anyStale && (
+        <div className="rounded-xl border border-amber-200 bg-amber-50 p-3 max-w-lg text-xs text-amber-700">
+          {t("workspace.ldgStaleNotice")}
+        </div>
+      )}
       {(reconQ.data ?? []).map((a) => {
         const driftOk = Math.abs(a.drift) < 1;
         return (
