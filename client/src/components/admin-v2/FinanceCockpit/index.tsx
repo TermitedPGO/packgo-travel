@@ -27,12 +27,6 @@ import type { FinanceReportView } from "../FinanceReports";
 
 const FinanceReports = lazy(() => import("../FinanceReports"));
 
-function formatAsOf(ms: number): string {
-  const d = new Date(ms);
-  const p = (n: number) => String(n).padStart(2, "0");
-  return `${d.getFullYear()}/${p(d.getMonth() + 1)}/${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`;
-}
-
 /**
  * 明細層:駕駛艙內開細節頁,附返回鍵。
  * "tax" = F3 塊D 正式「報表與稅務」頁(D 藍本);其餘 view 過渡期仍指既有
@@ -77,17 +71,17 @@ export default function FinanceCockpit() {
   return (
     <div className="h-full overflow-y-auto bg-white">
       <div className="mx-auto max-w-[1160px] px-6 md:px-9 pt-6 pb-16">
+        {/* 1A0a:廢頁級單一 as-of(max 遮蔽單源過期,U2);逐格 as-of 在 TruthRow。
+            任一源失敗亮頁級警示 badge(主態仍由逐格 state 呈現)。 */}
         <PageHeader
           title={t("financeCockpit.pageTitle")}
           caption={t("financeCockpit.pageSubtitle")}
           actions={
-            <div className="text-right text-[11px] leading-relaxed text-gray-400">
-              {t("financeCockpit.asOf", {
-                time: data.asOf ? formatAsOf(data.asOf) : "—",
-              })}
-              <br />
-              {t("financeCockpit.asOfSource")}
-            </div>
+            data.anySourceError ? (
+              <div className="text-right text-[11px] leading-relaxed text-amber-700">
+                {t("financeCockpit.sourceErrorBadge")}
+              </div>
+            ) : undefined
           }
         />
 

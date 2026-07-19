@@ -8,6 +8,7 @@
     "build": "vite build && esbuild server/_core/index.ts --platform=node --packages=external --bundle --format=esm --outdir=dist --banner:js=\"import { createRequire } from 'module'; const require = createRequire(import.meta.url);\" && esbuild server/scripts/sweep-place-aliases.ts --platform=node --packages=external --bundle --format=esm --outdir=dist/scripts --banner:js=\"import { createRequire } from 'module'; const require = createRequire(import.meta.url);\"",
     "start": "NODE_ENV=production node dist/index.js",
     "check": "tsc --noEmit",
+    "check:no-mock": "node scripts/check-no-mock.mjs",
     "format": "prettier --write .",
     "test": "vitest run",
     "ship": "node scripts/safe-deploy.mjs",

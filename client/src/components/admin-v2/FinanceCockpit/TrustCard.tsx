@@ -47,10 +47,34 @@ export function TrustCard({ trust }: { trust: TrustTile }) {
 
   const matched = foldMatchedNotDeparted(deferred.data as any, today, 4);
   const departed = foldDepartedPending(deferred.data as any, today);
-  const drift = trust.balance - trust.outstanding;
+  // 1A0a(Codex 7-18 P1-6):明細源(trustDeferredList)自己的狀態 —— aggregate
+  // 成功但明細失敗時不得安靜省略 booking 明細。
+  const detailCold = deferred.isError && deferred.data === undefined;
+  const detailStale = deferred.isError && deferred.data !== undefined;
+  const detailLoading = deferred.isLoading && deferred.data === undefined;
+  // 1A0a:數字欄 null = 無法核實;任一 null 一律走「無法核實」態,不折 0。
+  const n =
+    trust.balance !== null &&
+    trust.outstanding !== null &&
+    trust.matchedNotDeparted !== null &&
+    trust.unmatchedTotal !== null &&
+    trust.unmatchedCount !== null &&
+    trust.departedPending !== null &&
+    trust.departedPendingCount !== null
+      ? {
+          balance: trust.balance,
+          outstanding: trust.outstanding,
+          matchedNotDeparted: trust.matchedNotDeparted,
+          unmatchedTotal: trust.unmatchedTotal,
+          unmatchedCount: trust.unmatchedCount,
+          departedPending: trust.departedPending,
+          departedPendingCount: trust.departedPendingCount,
+        }
+      : null;
+  const drift = n !== null ? n.balance - n.outstanding : 0;
   const driftClean = Math.abs(drift) < DRIFT_CLEAN_THRESHOLD;
   const allZero =
-    trust.outstanding === 0 && trust.unmatchedCount === 0 && trust.departedPendingCount === 0;
+    n !== null && n.outstanding === 0 && n.unmatchedCount === 0 && n.departedPendingCount === 0;
 
   const title = trust.accountMask
     ? t("financeCockpit.ledger.trustCardTitle", { mask: trust.accountMask })
@@ -70,7 +94,9 @@ export function TrustCard({ trust }: { trust: TrustTile }) {
           ) : (
             <>
               {t("financeCockpit.ledger.trustMetaBalance")}{" "}
-              <b className="font-semibold text-gray-800 tabular-nums">{fmtMoney(trust.balance)}</b>
+              <b className="font-semibold text-gray-800 tabular-nums">
+                {trust.balance !== null ? fmtMoney(trust.balance) : "—"}
+              </b>
             </>
           )}
         </div>
@@ -81,7 +107,7 @@ export function TrustCard({ trust }: { trust: TrustTile }) {
           <div className="h-12 rounded bg-gray-100" />
           <div className="h-24 rounded bg-gray-50" />
         </div>
-      ) : trust.state === "error" ? (
+      ) : trust.state === "transport-error" || n === null ? (
         <div className="px-4 py-8 text-center text-xs text-gray-400">
           {t("financeCockpit.truth.loadError")}
         </div>
@@ -98,7 +124,7 @@ export function TrustCard({ trust }: { trust: TrustTile }) {
                 {t("financeCockpit.ledger.trustSplitMatched")}
               </div>
               <div className="text-base font-bold text-gray-900 tabular-nums">
-                {fmtMoney(trust.matchedNotDeparted)}
+                {fmtMoney(n.matchedNotDeparted)}
               </div>
             </div>
             <div className="flex-none self-center px-0.5 font-semibold text-gray-300">+</div>
@@ -107,7 +133,7 @@ export function TrustCard({ trust }: { trust: TrustTile }) {
                 {t("financeCockpit.ledger.trustSplitUnmatched")}
               </div>
               <div className="text-base font-bold text-amber-700 tabular-nums">
-                {fmtMoney(trust.unmatchedTotal)}
+                {fmtMoney(n.unmatchedTotal)}
               </div>
             </div>
             <div className="flex-none self-center px-0.5 font-semibold text-gray-300">+</div>
@@ -116,17 +142,33 @@ export function TrustCard({ trust }: { trust: TrustTile }) {
                 {t("financeCockpit.ledger.trustSplitDeparted")}
               </div>
               <div className="text-base font-bold text-gray-900 tabular-nums">
-                {fmtMoney(trust.departedPending)}
+                {fmtMoney(n.departedPending)}
               </div>
             </div>
           </div>
 
-          {allZero ? (
+          {detailLoading ? (
+            <div className="animate-pulse space-y-2 px-4 py-4">
+              <div className="h-8 rounded bg-gray-50" />
+              <div className="h-8 rounded bg-gray-50" />
+            </div>
+          ) : detailCold ? (
+            <div className="px-4 py-4 text-center text-xs text-amber-700">
+              {t("financeCockpit.ledger.trustDetailLoadFailed")}
+            </div>
+          ) : allZero && !detailStale ? (
+            /* 1A0a(Codex 7-18 P2-1):allZero 空態只在非 stale 時顯示,stale 走下方
+               保留舊值+badge,不被 trustEmpty 吞掉 */
             <div className="px-4 py-7 text-center text-xs text-gray-400">
               {t("financeCockpit.ledger.trustEmpty")}
             </div>
           ) : (
             <div className="px-4 pb-3 pt-1">
+              {detailStale && (
+                <div className="pb-1 text-[10px] text-amber-700">
+                  {t("financeCockpit.truth.staleHint")}
+                </div>
+              )}
               {/* 逐團列表:已對應未出發(近出發 amber dot) */}
               {matched.listed.map((row) => (
                 <div key={row.id} className="flex items-center gap-2 border-b border-gray-50 py-2 text-xs last:border-0">
@@ -173,19 +215,19 @@ export function TrustCard({ trust }: { trust: TrustTile }) {
               )}
 
               {/* 未對應列(amber,見左側待認領) */}
-              {trust.unmatchedCount > 0 && (
+              {n.unmatchedCount > 0 && (
                 <div className="flex items-center gap-2 border-b border-gray-50 py-2 text-xs last:border-0">
                   <span className="h-1.5 w-1.5 flex-shrink-0 rounded-full bg-amber-400" />
                   <div className="min-w-0 flex-1">
                     <div className="font-medium text-amber-700">
-                      {t("financeCockpit.ledger.trustRowUnmatched", { count: String(trust.unmatchedCount) })}
+                      {t("financeCockpit.ledger.trustRowUnmatched", { count: String(n.unmatchedCount) })}
                     </div>
                     <div className="mt-px text-[10px] text-gray-400">
                       {t("financeCockpit.ledger.trustRowUnmatchedDesc")}
                     </div>
                   </div>
                   <span className="flex-shrink-0 font-semibold text-amber-700 tabular-nums">
-                    {fmtMoney(trust.unmatchedTotal)}
+                    {fmtMoney(n.unmatchedTotal)}
                   </span>
                 </div>
               )}
@@ -224,26 +266,26 @@ export function TrustCard({ trust }: { trust: TrustTile }) {
             <Info className="mt-0.5 h-3 w-3 flex-shrink-0 text-gray-300" />
             <span>
               {t("financeCockpit.ledger.trustNoteEq", {
-                outstanding: fmtMoney(trust.outstanding),
-                matched: fmtMoney(trust.matchedNotDeparted),
-                unmatched: fmtMoney(trust.unmatchedTotal),
-                departed: fmtMoney(trust.departedPending),
+                outstanding: fmtMoney(n.outstanding),
+                matched: fmtMoney(n.matchedNotDeparted),
+                unmatched: fmtMoney(n.unmatchedTotal),
+                departed: fmtMoney(n.departedPending),
               })}
               {driftClean ? (
-                <> {t("financeCockpit.ledger.trustNoteBalanceClean", { balance: fmtMoney(trust.balance) })}</>
+                <> {t("financeCockpit.ledger.trustNoteBalanceClean", { balance: fmtMoney(n.balance) })}</>
               ) : drift < 0 ? (
                 /* F3 塊D 回爐 #3:負 drift 方向感知 —— 信託現金低於追蹤中的
                    未認列訂金,是查核級訊號(訂金可能未入信託或提前轉出) */
                 <>{" "}
                   {t("financeCockpit.ledger.trustNoteBalanceDriftNegative", {
-                    balance: fmtMoney(trust.balance),
+                    balance: fmtMoney(n.balance),
                     gap: fmtMoney(Math.abs(drift)),
                   })}
                 </>
               ) : (
                 <>{" "}
                   {t("financeCockpit.ledger.trustNoteBalanceDrift", {
-                    balance: fmtMoney(trust.balance),
+                    balance: fmtMoney(n.balance),
                     drift: fmtSignedMoney(drift),
                   })}
                 </>

@@ -574,6 +574,8 @@ export const en = {
     ldgAll: 'All Transactions',
     ldgTriageSub: 'AI guessed first, you confirm ({n} pending)',
     ldgTriageEmpty: 'Nothing left to sort',
+    ldgLoadFailed: 'Ledger data unverifiable (connection failed, will retry); no fake empty list.',
+    ldgStaleNotice: 'Ledger not refreshed (connection failed) — showing last successful read.',
     ldgInflow: 'Inflow',
     ldgOutflow: 'Expense',
     ldgAiPunted: 'AI Unsure',
@@ -3159,6 +3161,16 @@ export const en = {
     users: 'User Management',
     settings: 'System Settings',
     navHome: 'Home',
+    homeTitle: 'PACK&GO Ops',
+    homeSubtitle: 'Pick a workspace; the Finance Cockpit is the only source of financial truth',
+    homeNavFinance: 'Finance Cockpit',
+    homeNavFinanceDesc: 'Cash, P&L, pending claims, Trust (single finance-truth entry)',
+    homeNavWorkspace: 'Workspace',
+    homeNavWorkspaceDesc: 'Today, ledger, inquiries',
+    homeNavCustomers: 'Customers',
+    homeNavCustomersDesc: 'Customer list and orders',
+    homeNavTours: 'Tours',
+    homeNavToursDesc: 'Products and departures',
     navCustomers: 'Customers',
     navTours: 'Tours',
     navFinance: 'Finance',
@@ -4519,6 +4531,8 @@ export const en = {
       finDashComingSoon: 'Coming soon',
       finDashScan: 'Scan now',
       finDashDownloadCsv: 'Tax CSV',
+      finBlockedTitle: 'Tax CSV & AI finance advisor disabled',
+      finBlockedDesc: 'The tax CSV is a formal tax product pending CPA rulings; the AI advisor reads a P&L pipeline that has not converged. Disabled until the number contract lands.',
       finScanResult: 'Scan complete, {n} alerts produced',
       finCsvDownloaded: 'CSV downloaded',
       // Finance lane (P4) — advisor
@@ -5246,6 +5260,8 @@ export const en = {
 
     // Accounting Tab
     accounting: {
+      loading: 'Loading…',
+      plUnverifiable: 'P&L unverifiable (connection failed, retrying); no fake $0 shown.',
       pageTitle: 'Financial Management',
       pageDesc: 'Income & expense tracking, invoice management, financial reports',
       exportCsv: 'Export CSV',
@@ -5426,6 +5442,7 @@ export const en = {
       catOtherExpense: 'Other Expense',
     },
     bankLedgerTab: {
+      loadFailed: 'Transactions unverifiable (connection failed, will retry)',
       tabAll: 'All',
       tabUncategorized: 'Uncategorized',
       tabNeedsReview: 'Needs review',
@@ -5841,6 +5858,8 @@ export const en = {
 
     // ── Profit & Loss (M4) ──
     profitLoss: {
+      exportBlocked: 'Year-end tax ZIP disabled until number contract converges',
+      loadFailed: 'P&L unverifiable (connection failed, will retry); no fake $0 shown.',
       title: '📊 Profit & Loss',
       subtitle: '{period} · Net {net}',
       modeAnnual: 'Annual',
@@ -5887,6 +5906,7 @@ export const en = {
     },
 
     trustCompliance: {
+      loadFailed: 'Data unverifiable (connection failed, will retry)',
       title: '🔒 Trust Compliance',
       subtitle: 'Unrecognized deposits {outstanding} · CST §17550',
       disabledTitle: 'Trust deferral not enabled',
@@ -8600,7 +8620,21 @@ export const en = {
     toastStatusUpdated: 'Status updated',
     toastFailed: 'Failed: ',
   },
+  mobile: {
+    staleWriteBlocked: 'Data not refreshed (connection failed) — classify/exclude paused to avoid acting on stale state; retrying.',
+    loading: 'Loading…',
+    activityUnverifiable: 'Activity unverifiable (connection failed, retrying); no fake all-quiet shown.',
+    activityEmpty: 'All quiet — agents + Plaid + Gmail nothing new',
+    kpiUnverifiable: 'Finance numbers unverifiable',
+    kpiUnverifiableDesc: 'Connection failed, retrying shortly',
+    staleNotice: 'Not refreshed — showing last values',
+    staleNoticeDesc: 'Refresh failed; showing the last successful read. List state cannot be judged yet.',
+    txnsUnverifiable: 'Transactions unverifiable',
+    txnsUnverifiableDesc: 'Connection failed, retrying; this page will not show a fake all-clear.',
+    reviewPileUnverifiable: 'Transactions unverifiable (connection failed, retrying) — the review pile cannot be judged yet.',
+  },
   pendingClaimsTab: {
+    loadFailed: 'Pending claims unverifiable (connection failed, will retry)',
     tabLabel: 'Pending Claims',
     title: 'Pending Claims',
     subtitle: "Inflows the system couldn't match to a document. Suggested candidates are just guesses — you decide where each one goes.",
@@ -8756,8 +8790,7 @@ export const en = {
   financeCockpit: {
     pageTitle: 'Finance',
     pageSubtitle: 'Left is what needs you; right is the two books of record',
-    asOf: 'As of {time}',
-    asOfSource: 'P&L from Plaid · Trust #5442',
+    sourceErrorBadge: 'Some data sources failed to load — per-tile states are authoritative',
     loading: 'Loading…',
     truth: {
       cashLabel: 'Cash Position',
@@ -8773,8 +8806,9 @@ export const en = {
       trustLabel: 'Trust Unrecognized',
       trustHint: '{unmatched} unmatched in Trust · balance {balance}',
       trustDisabled: 'Trust deferral off',
-      loadError: 'Load failed',
+      loadError: 'Unverifiable',
       staleHint: 'Offline · showing last value',
+      asOfLabel: 'as of',
     },
     work: {
       colTitle: 'Work Area',
@@ -8785,6 +8819,9 @@ export const en = {
       pendingCardTitle: 'Inflows to Claim',
       pendingCardMetaCount: '{count} items · total',
       pendingCardMetaEmpty: 'Nothing to claim',
+      sourceErrorTitle: 'Work area state unverifiable',
+      sourceErrorDesc: 'Pending-claims or recognition source failed to load; retrying — no fake all-clear shown',
+      recogLoadError: 'Recognition queue unverifiable (connection failed, will retry)',
       pendingEmpty: 'No inflows waiting to be claimed',
       colDate: 'Date',
       colAmount: 'Amount',
@@ -8903,10 +8940,14 @@ export const en = {
       trustNoteBalanceDrift: 'Bank balance {balance}, {drift} off the total (untracked movement — investigate).',
       trustNoteBalanceDriftNegative: 'Bank balance {balance}: trust cash is {gap} below the unrecognized deposits being tracked — needs review (deposits may not have reached trust, or moved out early).',
       trustEmpty: 'No unrecognized customer deposits right now',
+      trustDetailLoadFailed: 'Per-booking detail unverifiable (connection failed, retrying); the split totals above remain truth-row sourced.',
       trustDisabledNote: 'Trust deferral is off; deposit reconciliation appears here once enabled.',
       listTruncated: '(source capped at first {limit}; list may be incomplete)',
     },
     tax: {
+      blockedTitle: 'Tax outputs disabled',
+      blockedDesc: 'Schedule C mapping, 1099-NEC, the year-end tax ZIP and the monthly trend are disabled until the finance number contract converges (three export paths diverge; CPA recognition matrix undecided).',
+      prevUnverifiable: 'Prior-period data unverifiable (failed or loading) — not the same as no prior data',
       scopeMonth: 'This month',
       scopeYtd: 'YTD',
       scopeLastYear: 'Last year',
