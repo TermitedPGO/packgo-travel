@@ -19,6 +19,7 @@ import { Check, X, SkipForward, Sparkles, ChevronLeft } from "lucide-react";
 import { trpc } from "@/lib/trpc";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
+import { useLocale } from "@/contexts/LocaleContext";
 
 type TxRow = {
   id: number;
@@ -49,7 +50,18 @@ const QUICK_CATEGORIES: Array<{ id: string; label: string; accent: string }> = [
 const fmt = (n: number) =>
   `$${Math.round(n).toLocaleString("en-US")}`;
 
+/**
+ * 1A0a(Codex 7-18 窄修1):stale 禁寫的唯一判定,抽成純函式供單元測試(互動
+ * regression:render-only 測試無法演練事件,改以此 predicate 釘住決策)。
+ * cached-stale = query 曾成功(data 保留)但當前 refetch 失敗;此時 current 可能
+ * 是被別處改過的舊列,禁止承載 mutation。
+ */
+export function shouldBlockTriageWrite(q: { isError: boolean; data: unknown }): boolean {
+  return q.isError && q.data !== undefined;
+}
+
 export default function BankTriagePage({ onExit }: { onExit: () => void }) {
+  const { t } = useLocale();
   const [idx, setIdx] = useState<number>(() => {
     const u = new URL(window.location.href);
     const v = parseInt(u.searchParams.get("triageIdx") ?? "0", 10);
@@ -81,6 +93,12 @@ export default function BankTriagePage({ onExit }: { onExit: () => void }) {
 
   const current = pile[idx];
 
+  // 1A0a(Codex 7-18 P1-1):cached-stale(refetch 失敗但保有上次資料)時,current
+  // 可能是已被別處改過的舊列 —— 禁止在 stale 資料上寫入(分類/排除),避免用過期
+  // 狀態承載 mutation。fresh 前一律擋,顯明確 stale 標記。
+  const txnsStale = txns.isError && txns.data !== undefined;
+  const writeBlocked = shouldBlockTriageWrite(txns);
+
   // Persist position so accidental close resumes
   useEffect(() => {
     const u = new URL(window.location.href);
@@ -90,35 +108,56 @@ export default function BankTriagePage({ onExit }: { onExit: () => void }) {
 
   const advance = () => setIdx((i) => i + 1);
 
+  /**
+   * 1A0a(Codex 7-18 15:56 P1-3):四條寫入路徑(確認 AI / 8 個改類別 pill / 排除
+   * 個人、含左右 swipe)唯一 mutation chokepoint。stale 禁寫 guard 只住在這裡,
+   * 不再分散三個 handler + touch handler 各自檢查 —— bankTriageInteraction 測試
+   * 用真事件 + mutation spy 釘住:移除此 guard,stale 狀態下 swipe 會打到
+   * mutation → 測試紅。按鈕/pill 的 disabled 屬性是第二層(UX),由 render 測試
+   * 的 disabled 計數獨立釘住。
+   */
+  const performTriageWrite = (input: {
+    transactionId: number;
+    category?: string;
+    exclude?: boolean;
+    reason?: string;
+  }): boolean => {
+    if (shouldBlockTriageWrite(txns)) {
+      toast.error(t("mobile.staleWriteBlocked"));
+      return false;
+    }
+    void update.mutateAsync(input);
+    return true;
+  };
+
   const confirmAI = () => {
     if (!current?.agentCategory) {
       advance();
       return;
     }
-    void update.mutateAsync({
-      transactionId: current.id,
-      category: current.agentCategory,
-    });
-    advance();
+    if (performTriageWrite({ transactionId: current.id, category: current.agentCategory })) {
+      advance();
+    }
   };
 
   const overrideCategory = (cat: string) => {
     if (!current) return;
-    void update.mutateAsync({
-      transactionId: current.id,
-      category: cat,
-    });
-    advance();
+    if (performTriageWrite({ transactionId: current.id, category: cat })) {
+      advance();
+    }
   };
 
   const markExcluded = () => {
     if (!current) return;
-    void update.mutateAsync({
-      transactionId: current.id,
-      exclude: true,
-      reason: "標為個人 — mobile triage",
-    });
-    advance();
+    if (
+      performTriageWrite({
+        transactionId: current.id,
+        exclude: true,
+        reason: "標為個人 — mobile triage",
+      })
+    ) {
+      advance();
+    }
   };
 
   // Swipe gesture handling
@@ -134,6 +173,8 @@ export default function BankTriagePage({ onExit }: { onExit: () => void }) {
   };
   const onTouchEnd = () => {
     const threshold = 100;
+    // swipe 寫入與按鈕同走 performTriageWrite 唯一 guard(stale 禁寫);此處不再
+    // 重複檢查 —— 疊床架屋的雙 guard 會讓「移除其一」測不出來(Codex 7-18 15:56 P1-3)
     if (dragX > threshold) {
       confirmAI();
     } else if (dragX < -threshold) {
@@ -146,6 +187,26 @@ export default function BankTriagePage({ onExit }: { onExit: () => void }) {
   if (txns.isLoading) {
     return (
       <div className="px-4 py-12 text-center text-gray-500">載入中…</div>
+    );
+  }
+
+  // 1A0a:讀取失敗不得偽裝「全部清完」(空 pile 假 all-clear)
+  if (txns.isError && txns.data === undefined) {
+    return (
+      <div className="px-4 py-12 text-center">
+        <div className="text-sm font-semibold text-amber-700">{t("mobile.txnsUnverifiable")}</div>
+        <p className="mt-1 text-xs text-gray-500">{t("mobile.txnsUnverifiableDesc")}</p>
+      </div>
+    );
+  }
+
+  // 1A0a(Codex 7-18 P1-6):cached empty + refetch 失敗 = stale,不得顯「全部清完」
+  if (!current && txnsStale) {
+    return (
+      <div className="px-4 py-12 text-center">
+        <div className="text-sm font-semibold text-amber-700">{t("mobile.staleNotice")}</div>
+        <p className="mt-1 text-xs text-gray-500">{t("mobile.staleNoticeDesc")}</p>
+      </div>
     );
   }
 
@@ -189,6 +250,13 @@ export default function BankTriagePage({ onExit }: { onExit: () => void }) {
           {idx + 1} / {pile.length}
         </div>
       </div>
+
+      {/* 1A0a:stale 橫幅(cached-nonempty + refetch 失敗)—— 明確標記 + 禁寫提示 */}
+      {writeBlocked && (
+        <div className="flex-shrink-0 bg-amber-50 border-b border-amber-200 px-4 py-2 text-center text-xs font-medium text-amber-700">
+          {t("mobile.staleWriteBlocked")}
+        </div>
+      )}
 
       {/* Card */}
       <div className="flex-1 px-4 py-4 flex items-center">
@@ -276,8 +344,9 @@ export default function BankTriagePage({ onExit }: { onExit: () => void }) {
                   key={c.id}
                   type="button"
                   onClick={() => overrideCategory(c.id)}
+                  disabled={writeBlocked}
                   className={cn(
-                    "px-2.5 py-1 rounded-md text-xs font-medium",
+                    "px-2.5 py-1 rounded-md text-xs font-medium disabled:opacity-40",
                     c.accent,
                   )}
                 >
@@ -309,7 +378,8 @@ export default function BankTriagePage({ onExit }: { onExit: () => void }) {
         <button
           type="button"
           onClick={markExcluded}
-          className="h-12 rounded-xl bg-rose-50 text-rose-700 font-medium text-sm flex items-center justify-center gap-1.5 active:bg-rose-100"
+          disabled={writeBlocked}
+          className="h-12 rounded-xl bg-rose-50 text-rose-700 font-medium text-sm flex items-center justify-center gap-1.5 active:bg-rose-100 disabled:opacity-40"
         >
           <X className="w-4 h-4" /> 排除個人
         </button>
@@ -323,7 +393,7 @@ export default function BankTriagePage({ onExit }: { onExit: () => void }) {
         <button
           type="button"
           onClick={confirmAI}
-          disabled={!current.agentCategory}
+          disabled={!current.agentCategory || writeBlocked}
           className="h-12 rounded-xl bg-emerald-600 text-white font-medium text-sm flex items-center justify-center gap-1.5 active:bg-emerald-700 disabled:opacity-50"
         >
           <Check className="w-4 h-4" /> 確認 AI

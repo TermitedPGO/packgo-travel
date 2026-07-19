@@ -147,10 +147,11 @@ describe("profitMargin — 利潤率 %", () => {
   });
 });
 
-describe("resolveTileState — 載入 / 失敗 / 舊值降級 / 就緒(fail-open)", () => {
-  it("首載失敗且沒有任何值 → error", () => {
-    expect(resolveTileState({ isLoading: false, isError: true, hasData: false })).toBe("error");
-    expect(resolveTileState({ isLoading: true, isError: true, hasData: false })).toBe("error");
+describe("resolveTileState — 載入 / 失敗 / 舊值降級 / 就緒", () => {
+  // 1A0a:TileState → QueryDisplayState 遷移,"error" 更名 "transport-error"
+  it("首載失敗且沒有任何值 → transport-error", () => {
+    expect(resolveTileState({ isLoading: false, isError: true, hasData: false })).toBe("transport-error");
+    expect(resolveTileState({ isLoading: true, isError: true, hasData: false })).toBe("transport-error");
   });
   it("refetch 失敗但 react-query 保留上次好值 → stale(顯示上次值+淡標記,F3 回爐 #7)", () => {
     expect(resolveTileState({ isLoading: false, isError: true, hasData: true })).toBe("stale");
@@ -237,9 +238,9 @@ describe("foldDepartedPending — 待認列確認卡(與 server departedPending 
     expect(out.count).toBe(1);
   });
 
-  it("空 / null 回全 0", () => {
-    expect(foldDepartedPending(null, TODAY)).toEqual({ items: [], total: 0, count: 0 });
-    expect(foldDepartedPending([], TODAY)).toEqual({ items: [], total: 0, count: 0 });
+  it("空 / null 回全 0(1A0a:invalidCount 欄 —— 爛值不折 0 的顯性排除計數)", () => {
+    expect(foldDepartedPending(null, TODAY)).toEqual({ items: [], total: 0, count: 0, invalidCount: 0 });
+    expect(foldDepartedPending([], TODAY)).toEqual({ items: [], total: 0, count: 0, invalidCount: 0 });
   });
 });
 

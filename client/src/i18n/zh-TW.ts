@@ -574,6 +574,8 @@ export const zhTW = {
     ldgAll: '全部交易',
     ldgTriageSub: 'AI 已先猜，你確認（{n} 筆待處理）',
     ldgTriageEmpty: '沒有待分類的交易',
+    ldgLoadFailed: '帳本資料無法核實（連線失敗，稍後自動重試）；不顯示假的空清單。',
+    ldgStaleNotice: '帳本資料未更新（連線失敗），顯示上次成功讀取的內容。',
     ldgInflow: '入帳',
     ldgOutflow: '支出',
     ldgAiPunted: 'AI 沒把握',
@@ -3127,6 +3129,16 @@ export const zhTW = {
     users: '會員管理',
     settings: '系統設定',
     navHome: '首頁',
+    homeTitle: 'PACK&GO 後台',
+    homeSubtitle: '選一個工作區開始；財務真值唯一入口是財務駕駛艙',
+    homeNavFinance: '財務駕駛艙',
+    homeNavFinanceDesc: '現金、損益、待認領、Trust（唯一財務真值入口）',
+    homeNavWorkspace: '工作台',
+    homeNavWorkspaceDesc: '今日工作、帳本、詢問',
+    homeNavCustomers: '客人',
+    homeNavCustomersDesc: '客戶列表與訂單',
+    homeNavTours: '行程',
+    homeNavToursDesc: '商品與出團管理',
     navCustomers: '客人',
     navTours: '行程庫',
     navFinance: '財務',
@@ -4481,6 +4493,8 @@ export const zhTW = {
       finDashComingSoon: '即將上線',
       finDashScan: '一鍵掃描',
       finDashDownloadCsv: '報稅 CSV',
+      finBlockedTitle: '報稅 CSV 與 AI 財務顧問停用中',
+      finBlockedDesc: '報稅 CSV 是未經 CPA 裁定的正式稅務產物；AI 財務顧問內部讀取的損益口徑尚未收斂。財務口徑收斂與裁定完成前停用。',
       finScanResult: '掃描完成，產生 {n} 筆警示',
       finCsvDownloaded: 'CSV 已下載',
       // 財務頁 (P4) — advisor
@@ -5208,6 +5222,8 @@ export const zhTW = {
 
     // 財務管理頁
     accounting: {
+      loading: '載入中…',
+      plUnverifiable: '損益資料無法核實（連線失敗，稍後自動重試）；不顯示假 $0。',
       pageTitle: '財務管理',
       pageDesc: '收支記帳、發票管理、財務報表',
       exportCsv: '匯出 CSV',
@@ -5375,6 +5391,7 @@ export const zhTW = {
       catOtherExpense: '其他支出',
     },
     bankLedgerTab: {
+      loadFailed: '交易清單無法核實（連線失敗，稍後自動重試）',
       tabAll: '全部',
       tabUncategorized: '未分類',
       tabNeedsReview: '需審核',
@@ -5790,6 +5807,8 @@ export const zhTW = {
 
     // ── Profit & Loss (M4) ──
     profitLoss: {
+      exportBlocked: '年度報稅包下載停用中（口徑收斂前）',
+      loadFailed: '損益報表無法核實（連線失敗，稍後自動重試）；本頁不顯示假 $0。',
       title: '📊 損益表',
       subtitle: '{period} · 淨利 {net}',
       modeAnnual: '年度',
@@ -5836,6 +5855,7 @@ export const zhTW = {
     },
 
     trustCompliance: {
+      loadFailed: '資料無法核實（連線失敗，稍後自動重試）',
       title: '🔒 客人訂金',
       subtitle: '還沒變成收入的客人訂金 {outstanding}',
       disabledTitle: '客人訂金延後計收入功能未啟用',
@@ -8598,7 +8618,21 @@ export const zhTW = {
     toastStatusUpdated: '狀態已更新',
     toastFailed: '失敗：',
   },
+  mobile: {
+    staleWriteBlocked: '資料未更新(連線失敗),為避免用過期狀態誤改,分類/排除已暫時停用,重試中。',
+    loading: '載入中…',
+    activityUnverifiable: '動態無法核實（連線失敗，稍後自動重試）；不顯示假的「一切安靜」。',
+    activityEmpty: '沒有新動靜 — agents + Plaid + Gmail 都安靜',
+    kpiUnverifiable: '財務數字無法核實',
+    kpiUnverifiableDesc: '連線失敗，稍後自動重試',
+    staleNotice: '資料未更新，顯示上次數字',
+    staleNoticeDesc: '連線失敗，顯示的是上次成功讀取的內容；清單狀態暫不可判定。',
+    txnsUnverifiable: '交易清單無法核實',
+    txnsUnverifiableDesc: '連線失敗，稍後自動重試；此頁不顯示假的「全部清完」。',
+    reviewPileUnverifiable: '交易清單無法核實（連線失敗，稍後自動重試），「需要你決定」清單暫不可判定。',
+  },
   pendingClaimsTab: {
+    loadFailed: '待認領清單無法核實（連線失敗，稍後自動重試）',
     tabLabel: '待認領',
     title: '待認領入帳',
     subtitle: '系統對不上單據的入帳，猜的候選訂單僅供參考，最終一律由你決定認領到哪裡。',
@@ -8754,8 +8788,7 @@ export const zhTW = {
   financeCockpit: {
     pageTitle: '財務',
     pageSubtitle: '左邊是你要做的事，右邊是兩本權威帳',
-    asOf: '資料截至 {time}',
-    asOfSource: '損益來源 Plaid · Trust #5442',
+    sourceErrorBadge: '部分資料源讀取失敗，逐格狀態為準',
     loading: '載入中…',
     truth: {
       cashLabel: '現金部位',
@@ -8771,8 +8804,9 @@ export const zhTW = {
       trustLabel: 'Trust 未認列',
       trustHint: '另 {unmatched} Trust 未對應 · 餘額 {balance}',
       trustDisabled: 'Trust 遞延未啟用',
-      loadError: '讀取失敗',
+      loadError: '無法核實',
       staleHint: '連線中斷 · 顯示上次數值',
+      asOfLabel: '截至',
     },
     work: {
       colTitle: '工作區',
@@ -8783,6 +8817,9 @@ export const zhTW = {
       pendingCardTitle: '待認領入帳',
       pendingCardMetaCount: '{count} 筆 · 共',
       pendingCardMetaEmpty: '沒有待認領',
+      sourceErrorTitle: '工作區狀態無法核實',
+      sourceErrorDesc: '待認領或待認列來源連線失敗，稍後自動重試；不顯示假的「沒事」',
+      recogLoadError: '待認列清單無法核實（連線失敗，稍後自動重試）',
       pendingEmpty: '目前沒有待認領的入帳',
       colDate: '日期',
       colAmount: '金額',
@@ -8901,10 +8938,14 @@ export const zhTW = {
       trustNoteBalanceDrift: '銀行餘額 {balance}，與合計差 {drift}（追蹤外變動，待查）。',
       trustNoteBalanceDriftNegative: '銀行餘額 {balance}：信託帳戶現金低於追蹤中的未認列訂金 {gap}，需查核（訂金可能未入信託或提前轉出）。',
       trustEmpty: '目前沒有未認列的客人訂金',
+      trustDetailLoadFailed: '逐團明細無法核實（連線失敗，稍後自動重試）；三段合計仍為真相列同源數字。',
       trustDisabledNote: 'Trust 遞延未啟用，啟用後這裡會顯示訂金勾稽。',
       listTruncated: '（來源僅取前 {limit} 筆，列表可能不完整）',
     },
     tax: {
+      blockedTitle: '報稅產物停用中',
+      blockedDesc: 'Schedule C 對照、1099-NEC、年度報稅包與月度趨勢在財務口徑收斂前停用（畫面、稅表 CSV 與年終 ZIP 三條算法尚未收斂，CPA 認列矩陣未定）。收斂與裁定完成後恢復。',
+      prevUnverifiable: '前期資料無法核實（連線失敗或載入中），不代表無前期資料',
       scopeMonth: '本月',
       scopeYtd: '今年 YTD',
       scopeLastYear: '去年',

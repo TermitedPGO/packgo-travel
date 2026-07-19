@@ -177,7 +177,8 @@ function StatusToggle({
   onClick,
 }: {
   label: string;
-  count: number;
+  /** 1A0a(Codex 7-18 P1-3):未取得(loading/cold error)= null → 顯「–」不報 0。 */
+  count: number | null;
   active: boolean;
   tone?: StatusTone;
   onClick: () => void;
@@ -195,7 +196,7 @@ function StatusToggle({
       {tone && !active && <StatusDot tone={tone} size="xs" />}
       <span>{label}</span>
       <span className={`tabular-nums ${active ? "text-white/70" : "text-gray-400"}`}>
-        {count}
+        {count === null ? "–" : count}
       </span>
     </button>
   );
@@ -226,7 +227,7 @@ export default function BankLedgerV2() {
   const [batchCategory, setBatchCategory] = useState<string>("");
 
   const utils = trpc.useUtils();
-  const { data, isLoading, refetch } = trpc.plaid.transactionsList.useQuery({
+  const { data, isLoading, isError, refetch } = trpc.plaid.transactionsList.useQuery({
     dateFrom,
     dateTo,
     includeExcluded: true, // we filter client-side so the "已排除" tab works
@@ -236,7 +237,16 @@ export default function BankLedgerV2() {
 
   const rawItems = (data?.items ?? []) as TxRow[];
 
-  const counts = useMemo(() => computeLedgerCounts(rawItems), [rawItems]);
+  // 1A0a(Codex 7-18 P1-3 + 15:56 P1-1):未取得(loading / cold error)與
+  // cached-empty stale(isError + 快取為空)→ counts 全 null,filter pill 顯「–」
+  // 不報 0 —— 空快取撐不起「真零」宣稱,refetch 失敗時 0 就是假 all-clear。
+  // 只有 cached-nonempty stale 才沿用快取 counts(stale banner 另標)。
+  const rawCounts = useMemo(() => computeLedgerCounts(rawItems), [rawItems]);
+  const countsUnknown = isLoading || (isError && rawItems.length === 0);
+  const counts: { all: number | null; uncategorized: number | null; needsReview: number | null; categorized: number | null; excluded: number | null } =
+    countsUnknown
+      ? { all: null, uncategorized: null, needsReview: null, categorized: null, excluded: null }
+      : rawCounts;
 
   const filtered = useMemo(() => {
     let list = rawItems.filter((tx) => matchesTab(tx, tab));
@@ -682,8 +692,25 @@ export default function BankLedgerV2() {
         </div>
       )}
 
-      {/* Table */}
-      {!isLoading && filtered.length === 0 ? (
+      {/* Table(1A0a:讀取失敗 ≠ 空清單;cached refetch 失敗 = stale) */}
+      {!isLoading && isError && data !== undefined && (
+        <div className="rounded-lg border border-amber-200 bg-amber-50 p-2 text-center text-xs text-amber-700">
+          {t("financeCockpit.truth.staleHint")}
+        </div>
+      )}
+      {!isLoading && isError && data === undefined ? (
+        <div className="rounded-xl border border-amber-200 bg-amber-50 p-6 text-center text-xs text-amber-700">
+          {t("admin.bankLedgerTab.loadFailed")}
+        </div>
+      ) : !isLoading && isError && filtered.length === 0 ? (
+        /* 1A0a(Codex 7-18 15:56 P1-1):cached-empty stale(isError + 快取空/濾後空)
+           只顯 stale 態 —— 不進 clean EmptyState,也不進 DataTable(data=[]) 的
+           clean「暫無資料」;空快取 + refetch 失敗 ≠ 可核實的空清單 */
+        <div className="rounded-xl border border-amber-200 bg-amber-50 p-6 text-center text-xs text-amber-700">
+          {t("financeCockpit.truth.staleHint")}
+        </div>
+      ) : !isLoading && !isError && filtered.length === 0 ? (
+        /* 1A0a(Codex 7-18 P1-2):EmptyState 僅在非 error 的真空時出現 */
         <EmptyState
           icon={<Landmark className="h-8 w-8" />}
           title={t("admin.bankLedgerTab.emptyTitle")}
@@ -1456,7 +1483,7 @@ function IRSDocumentationSection({
 function ChangeHistorySection({ txId }: { txId: number }) {
   const { t, language } = useLocale();
   const dateLocale = language === "en" ? "en-US" : "zh-TW";
-  const { data, isLoading } = trpc.plaid.transactionAuditHistory.useQuery(
+  const { data, isLoading, isError } = trpc.plaid.transactionAuditHistory.useQuery(
     { transactionId: txId },
     { staleTime: 30_000 },
   );
@@ -1472,13 +1499,27 @@ function ChangeHistorySection({ txId }: { txId: number }) {
     );
   }
 
+  // 1A0a(Codex 7-18 P1-5):讀取失敗 ≠ 沒有紀錄
+  if (isError && data === undefined) {
+    return (
+      <div className="space-y-2">
+        <SectionTitle>{t("admin.bankLedgerTab.sectionHistory")}</SectionTitle>
+        <div className="text-xs text-amber-700">
+          {t("admin.bankLedgerTab.loadFailed")}
+        </div>
+      </div>
+    );
+  }
+
   const rows = data ?? [];
+  // 1A0a(Codex 7-18 R3):cached refetch 失敗 = stale,不得把「失敗」畫成「沒有紀錄」
+  const stale = isError && data !== undefined;
   if (rows.length === 0) {
     return (
       <div className="space-y-2">
         <SectionTitle>{t("admin.bankLedgerTab.sectionHistory")}</SectionTitle>
-        <div className="text-xs text-gray-400 italic">
-          {t("admin.bankLedgerTab.emptyHistory")}
+        <div className={`text-xs italic ${stale ? "text-amber-700" : "text-gray-400"}`}>
+          {stale ? t("financeCockpit.truth.staleHint") : t("admin.bankLedgerTab.emptyHistory")}
         </div>
       </div>
     );
@@ -1487,6 +1528,9 @@ function ChangeHistorySection({ txId }: { txId: number }) {
   return (
     <div className="space-y-2">
       <SectionTitle>{t("admin.bankLedgerTab.sectionHistory")}</SectionTitle>
+      {stale && (
+        <div className="text-[10px] text-amber-700">{t("financeCockpit.truth.staleHint")}</div>
+      )}
       <ul className="space-y-2">
         {rows.map((row) => {
           const ts = row.createdAt
@@ -1649,6 +1693,17 @@ function CsvImportDialog({
                 ))}
               </SelectContent>
             </Select>
+            {/* 1A0a(Codex 7-18 P1-5/R3):帳戶清單讀取失敗要給原因,不能只留空下拉;
+                cached refetch 失敗(含 cached-empty)標 stale 而非靜默空白 */}
+            {accounts.isError && accounts.data === undefined ? (
+              <div className="mt-1.5 text-xs text-amber-700">
+                {t("admin.bankLedgerTab.loadFailed")}
+              </div>
+            ) : accounts.isError ? (
+              <div className="mt-1.5 text-xs text-amber-700">
+                {t("financeCockpit.truth.staleHint")}
+              </div>
+            ) : null}
           </div>
 
           <div>

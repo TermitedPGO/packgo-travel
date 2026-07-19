@@ -142,6 +142,15 @@ async function guardInner(deps, opts) {
   if (porcelain) return fail(`uncommitted changes / untracked files present:\n${indent(porcelain)}`);
   ok("working tree clean");
 
+  // 1A0a build marker(finance plan v4.3 §3.2.9):部署 image 的 __BUILD_SHA__
+  // 一律 = 本次已核准 HEAD 的完整 40-hex sha,經 --build-arg 傳入(Docker context
+  // 無 .git,container 內取不到;host 端這裡是唯一真值源)。非法 sha 直接 fail,
+  // 禁止 "unknown" 進可部署 artifact。
+  const gitSha = gtrim("git rev-parse HEAD");
+  if (!/^[0-9a-f]{40}$/.test(gitSha)) {
+    return fail(`git rev-parse HEAD returned invalid sha: '${gitSha}'`);
+  }
+
   // 3. fetch + must not be behind origin/main
   log("[3/7] sync with origin/main (must not be behind)");
   try {
@@ -277,15 +286,17 @@ async function guardInner(deps, opts) {
   ok("authorized by Jeff (one-time token matched)");
 
   // ---- all gates green (1–7 + 6.5 SQL 彩排) ----
+  const deployCmd = `flyctl deploy --remote-only -a ${APP} --build-arg GIT_SHA=${gitSha}`;
+
   if (dryRun) {
     log("\n✅ [DRY-RUN] all gates passed (含 6.5 SQL 彩排). Would now run:");
-    log(`     flyctl deploy --remote-only -a ${APP}`);
+    log(`     ${deployCmd}`);
     log("   then: consume .deploy-approve, curl /health, print version.");
     log("   (dry-run: nothing deployed, .deploy-approve left intact)");
     return 0;
   }
 
-  log(`\n🚀 all gates green — deploying: flyctl deploy --remote-only -a ${APP}`);
+  log(`\n🚀 all gates green — deploying: ${deployCmd}`);
   try {
     // tee → the FULL build+release output streams live to Jeff's terminal AND
     // is captured to ERROR_LOG_FILE (tee truncates, so the file always holds
@@ -293,7 +304,7 @@ async function guardInner(deps, opts) {
     // pipeline surface flyctl's non-zero exit — without it the pipeline status
     // is tee's, which is always 0, and a failed deploy would look like success.
     run(
-      `set -o pipefail; flyctl deploy --remote-only -a ${APP} 2>&1 | tee ${ERROR_LOG_FILE}`,
+      `set -o pipefail; ${deployCmd} 2>&1 | tee ${ERROR_LOG_FILE}`,
       { inherit: true, shell: "/bin/bash" },
     );
   } catch {

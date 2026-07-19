@@ -2,7 +2,7 @@
  * Tests for the deploy guard. Uses Node's built-in test runner so it needs no
  * vitest config wiring:
  *
- *   node --test scripts/safe-deploy.test.mjs      (or: pnpm deploy:test)
+ *   node --test scripts/safe-deploy.test.mjs
  *
  * Every side effect is faked via the injected `deps`, so NOTHING here touches
  * real git / tsc / vitest / flyctl / the network. The "all green" case asserts
@@ -11,7 +11,27 @@
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import {
+  readFileSync,
+  cpSync,
+  mkdtempSync,
+  mkdirSync,
+  rmSync,
+  existsSync,
+  readdirSync,
+  statSync,
+  symlinkSync,
+  unlinkSync,
+} from "node:fs";
+import { tmpdir } from "node:os";
+import { execSync } from "node:child_process";
+import { fileURLToPath } from "node:url";
+import { dirname, join, relative, sep } from "node:path";
 import { runGuard } from "./safe-deploy.mjs";
+
+const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
+
+const DEFAULT_SHA = "aabbccddeeff00112233445566778899aabbccdd";
 
 function makeDeps(o = {}) {
   const state = {
@@ -32,6 +52,8 @@ function makeDeps(o = {}) {
   const run = (cmd) => {
     calls.push(cmd);
     if (cmd.includes("rev-parse --abbrev-ref")) return state.branch + "\n";
+    // 1A0a build marker:host 端唯一 sha 真值源(Docker context 無 .git)
+    if (cmd.includes("rev-parse HEAD")) return (state.headSha ?? DEFAULT_SHA) + "\n";
     if (cmd.includes("status --porcelain")) return state.porcelain;
     if (cmd.includes("git fetch")) return "";
     if (cmd.includes("rev-list --count HEAD..origin/main")) return state.behind + "\n";
@@ -496,4 +518,207 @@ test("review-gate PASS: 乾淨索引(無 待傳/待裁定/退回)→ 過閘、�
     d._logs.some((l) => l.includes("外部審查索引無")),
     "expected a pass line for the review gate",
   );
+});
+
+// ---- 1A0a build marker(finance plan v4.3 §3.2.9 / Codex 7-18 返工單 1)----
+
+test("build marker: deploy 指令帶 --build-arg GIT_SHA=<host HEAD 完整 40-hex>(exact)", async () => {
+  const d = makeDeps();
+  const code = await runGuard(d, {});
+  assert.equal(code, 0);
+  const deployCall = d._calls.find((c) => c.includes("flyctl deploy"));
+  assert.ok(deployCall, "expected a flyctl deploy call");
+  assert.ok(
+    deployCall.includes(`--build-arg GIT_SHA=${DEFAULT_SHA}`),
+    `deploy command must carry the exact approved HEAD sha; got: ${deployCall}`,
+  );
+});
+
+test("build marker: dry-run 同步顯示 build-arg(Jeff 部署前可肉眼核 sha)", async () => {
+  const d = makeDeps();
+  const code = await runGuard(d, { dryRun: true });
+  assert.equal(code, 0);
+  assert.ok(
+    d._logs.some((l) => l.includes(`--build-arg GIT_SHA=${DEFAULT_SHA}`)),
+    "dry-run output must show the exact build-arg",
+  );
+});
+
+test("build marker: sha 取自 host `git rev-parse HEAD`(Docker context 無 .git 仍產有效 marker 的契約)", async () => {
+  const d = makeDeps();
+  await runGuard(d, {});
+  assert.ok(
+    d._calls.some((c) => c.includes("git rev-parse HEAD")),
+    "sha must come from host git — the build container has no .git (.dockerignore)",
+  );
+});
+
+test("build marker: 非法 sha(如 'unknown')→ fail,不得進可部署 artifact", async () => {
+  const d = makeDeps({ headSha: "unknown" });
+  const code = await runGuard(d, {});
+  assert.equal(code, 1);
+  assert.equal(reachedDeploy(d), false);
+});
+
+// ---- 1A0a Docker build-marker 接線契約(Codex 7-18 P2-3)----
+// 真正的產物契約:Docker context 無 .git,marker 必須靠 build-arg 注入。
+// 這組讀 Dockerfile + vite.config.ts 斷言接線,刪 ARG/ENV GIT_SHA 或斷開 vite
+// define 會使其中一條紅——不再只證 host git rev-parse。
+
+test("Dockerfile: ARG GIT_SHA + ENV GIT_SHA 存在且在 `RUN pnpm build` 之前(container 無 .git,靠 build-arg)", () => {
+  const df = readFileSync(join(ROOT, "Dockerfile"), "utf8");
+  const argIdx = df.search(/ARG\s+GIT_SHA/);
+  const envIdx = df.search(/ENV\s+GIT_SHA=\$GIT_SHA/);
+  const buildIdx = df.search(/RUN\s+pnpm\s+build/);
+  assert.ok(argIdx > -1, "Dockerfile must declare ARG GIT_SHA");
+  assert.ok(envIdx > -1, "Dockerfile must set ENV GIT_SHA=$GIT_SHA");
+  assert.ok(buildIdx > -1, "Dockerfile must RUN pnpm build");
+  assert.ok(argIdx < buildIdx && envIdx < buildIdx, "GIT_SHA ARG/ENV must precede the Vite build");
+});
+
+test(".dockerignore excludes .git (證明 container 內 git rev-parse 不可用,marker 必須來自 build-arg)", () => {
+  const di = readFileSync(join(ROOT, ".dockerignore"), "utf8");
+  assert.match(di, /^\.git$/m, ".dockerignore must exclude .git");
+});
+
+test("vite.config.ts: __BUILD_SHA__ define 讀 process.env.GIT_SHA(build-arg → ENV → define 全鏈接上)", () => {
+  const vc = readFileSync(join(ROOT, "vite.config.ts"), "utf8");
+  assert.match(vc, /__BUILD_SHA__/, "vite define must expose __BUILD_SHA__");
+  assert.match(vc, /process\.env\.GIT_SHA/, "vite define must read process.env.GIT_SHA");
+  // 空字串也要退 fallback(Docker ARG 預設 ""):不得用 `?? ` 讓 "" 漏成 marker
+  assert.ok(!/process\.env\.GIT_SHA\s*\?\?/.test(vc), "must not use `?? ` (empty string would leak as marker); use `||`");
+});
+
+// ---- 1A0a 真產物契約(Codex 7-18 15:56 窄修 4)----------------------------
+// 上面三條只讀檔;15:56 P2-1 的反例:註解掉 ARG/ENV 或把 marker 強制 unknown,
+// regex 條可被繞過而 39/39 仍綠。本條做「實際無 .git context 的產物 build」:
+//
+// 1. 依 .dockerignore 把 working tree 複製成 Docker build context 模擬
+//    (無 .git、無 node_modules、無 dist —— 與 remote builder 收到的 context 同構)。
+// 2. 解析 Dockerfile:只有當 ARG GIT_SHA + ENV GIT_SHA=$GIT_SHA 以未註解形式存在
+//    且在 RUN pnpm build 之前,GIT_SHA 才會像 --build-arg 一樣進入 build 環境。
+//    → 註解/刪除 ARG 或 ENV ⇒ build 收不到 sha ⇒ bundle 無 sha ⇒ 本條紅。
+// 3. 在 context 內跑 Dockerfile 同款 `pnpm build`,掃 dist/public 產物:
+//    exact 40-hex HEAD sha 必須在 client bundle 內。
+//    → vite 強制 unknown ⇒ sha 不在 bundle ⇒ 本條紅。
+//
+// 與真 Docker 的兩點誠實差異(本機/終驗沙箱無 Docker CLI):
+// - node_modules 以 symlink 借用 host 安裝(容器內是 pnpm install;受測契約是
+//   marker 注入鏈,不是依賴解析)。
+// - build env 以 GIT_DIR=<ctx>/.git(已斷言不存在)+ GIT_CEILING_DIRECTORIES=
+//   dirname(ctx) 封死 git repo 探索:ctx 內無 .git、GIT_DIR 指向不存在路徑、
+//   ceiling 擋祖先向上逃逸(注意 ceiling 只擋「嚴格祖先」,設 ctx 自身是 no-op,
+//   故必須設 dirname(ctx))。三層合起來 = 容器內「無任何 repo 可找」的忠實模擬,
+//   即使 ctx 落在 EPERM fallback(node_modules/.cache,位於 host worktree 內)
+//   或外層 shell 洩漏 GIT_DIR/GIT_WORK_TREE,vite 的 git fallback 也必然失敗。
+// 負斷言用「sha 不在產物」表達:兩個指定突變(停用 ARG/ENV、強制 unknown)都
+// 收斂成 sha 缺席;直接掃 "unknown" 字樣會誤中 minified 第三方碼,不承重。
+
+test("真產物契約:無 .git context build 後 dist/public 含 exact HEAD sha(停用 ARG/ENV 或強制 unknown 必紅)", () => {
+  const sha = execSync("git rev-parse HEAD", { cwd: ROOT, encoding: "utf8" }).trim();
+  assert.match(sha, /^[0-9a-f]{40}$/, "host HEAD 必須是完整 40-hex(safe-deploy 的 sha 真值源)");
+
+  // Dockerfile 接線決定 build env 是否拿得到 GIT_SHA(未註解行才算數)
+  const dfLines = readFileSync(join(ROOT, "Dockerfile"), "utf8")
+    .split("\n")
+    .map((l) => l.trim());
+  const argIdx = dfLines.findIndex((l) => /^ARG\s+GIT_SHA\b/.test(l));
+  const envIdx = dfLines.findIndex((l) => /^ENV\s+GIT_SHA=\$GIT_SHA\b/.test(l));
+  const buildIdx = dfLines.findIndex((l) => /^RUN\s+pnpm\s+build\b/.test(l));
+  const wired =
+    argIdx !== -1 && envIdx !== -1 && buildIdx !== -1 && argIdx < buildIdx && envIdx < buildIdx;
+
+  // .dockerignore → 排除規則(rooted、* 不跨 /;略過 ! 重納入 —— 只會縮小 context,
+  // 縮小不可能偽造 marker,fail-safe)
+  const patterns = readFileSync(join(ROOT, ".dockerignore"), "utf8")
+    .split("\n")
+    .map((l) => l.trim())
+    .filter((l) => l && !l.startsWith("#") && !l.startsWith("!"))
+    .map((p) => (p.endsWith("/") ? p.slice(0, -1) : p));
+  const patRes = patterns.map(
+    (p) =>
+      new RegExp(
+        "^" +
+          p
+            .split("/")
+            .map((seg) =>
+              seg
+                .split("")
+                .map((ch) => (ch === "*" ? "[^/]*" : ch === "?" ? "[^/]" : ch.replace(/[.+^${}()|[\]\\]/g, "\\$&")))
+                .join(""),
+            )
+            .join("/") +
+          "(/|$)",
+      ),
+  );
+  const excluded = (rel) => patRes.some((re) => re.test(rel));
+
+  // context 目錄:優先系統 temp;唯讀沙箱 EPERM 時退 node_modules/.cache(untracked,
+  // 不污染 worktree)
+  let ctx;
+  try {
+    ctx = mkdtempSync(join(tmpdir(), "packgo-docker-ctx-"));
+  } catch {
+    ctx = join(ROOT, "node_modules", ".cache", `packgo-docker-ctx-${process.pid}`);
+    rmSync(ctx, { recursive: true, force: true });
+    mkdirSync(ctx, { recursive: true });
+  }
+
+  try {
+    cpSync(ROOT, ctx, {
+      recursive: true,
+      filter: (src) => {
+        const rel = relative(ROOT, src).split(sep).join("/");
+        if (rel === "") return true;
+        return !excluded(rel);
+      },
+    });
+
+    // context 必須真的無 .git —— 這是「marker 只能來自 build-arg」的前提
+    assert.ok(!existsSync(join(ctx, ".git")), "Docker context 模擬不得含 .git");
+    assert.ok(existsSync(join(ctx, "vite.config.ts")), "context 應含 build 所需源碼");
+
+    // 容器內是 pnpm install;host 已裝好的 node_modules 直接借用(見上方誠實差異)
+    symlinkSync(join(ROOT, "node_modules"), join(ctx, "node_modules"));
+
+    execSync("pnpm build", {
+      cwd: ctx,
+      stdio: "pipe",
+      timeout: 600_000,
+      maxBuffer: 1 << 28,
+      env: {
+        ...process.env,
+        // Dockerfile 接線斷了 ⇒ 模擬 --build-arg 傳了也到不了 build step
+        GIT_SHA: wired ? sha : "",
+        // 容器內無 repo 的三層忠實模擬(見上方註解):GIT_DIR 指向 ctx 內不存在
+        // 的 .git(蓋掉外層任何 GIT_DIR/GIT_WORK_TREE 洩漏),ceiling 設父目錄
+        // 擋祖先探索(設 ctx 自身無效 —— ceiling 只擋嚴格祖先)。
+        GIT_DIR: join(ctx, ".git"),
+        GIT_WORK_TREE: ctx,
+        GIT_CEILING_DIRECTORIES: dirname(ctx),
+      },
+    });
+
+    // 掃 client bundle(dist/public):exact sha 必須出現
+    const hits = [];
+    const walk = (dir) => {
+      for (const name of readdirSync(dir)) {
+        const p = join(dir, name);
+        if (statSync(p).isDirectory()) walk(p);
+        else if (/\.(js|mjs|html)$/.test(name) && readFileSync(p, "utf8").includes(sha)) hits.push(p);
+      }
+    };
+    const clientOut = join(ctx, "dist", "public");
+    assert.ok(existsSync(clientOut), "pnpm build 應產出 dist/public(client bundle)");
+    walk(clientOut);
+    assert.ok(
+      hits.length >= 1,
+      `client bundle 必須含 exact HEAD sha ${sha}(Dockerfile 接線 wired=${wired});` +
+        "停用 ARG/ENV GIT_SHA 或把 vite marker 強制 unknown 都會在此紅",
+    );
+  } finally {
+    // 先拆 symlink 再清目錄:絕不可跟進 symlink 動到真 node_modules
+    try { unlinkSync(join(ctx, "node_modules")); } catch { /* 未建立時忽略 */ }
+    rmSync(ctx, { recursive: true, force: true });
+  }
 });
