@@ -106,6 +106,45 @@ function makeDeps(o = {}) {
     // 閘 6.5 — SQL 彩排 fake。預設回全過;測試可用 rehearseResult 注入失敗/通道錯,
     // 或 rehearseThrow 模擬 orchestrator 起不來(tsx crash)。記一個 "rehearse()" 標記
     // 讓測試能斷言「SKIP_SQL_REHEARSAL=1 時完全沒被呼叫」。
+    // audit-chain-repair R5-2 — 機器一致性 + 鏈錨定 fakes。記 "machines()" /
+    // "epochAnchor()" 呼叫標記,讓測試能斷言「token 未設 / 機器不一致時絕不錨定」。
+    machines: () => {
+      calls.push("machines()");
+      return (
+        state.machinesResult ?? [
+          {
+            state: "started",
+            image_ref: { registry: "registry.fly.io", repository: "packgo-travel", tag: "deployment-NEW", digest: "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" },
+          },
+        ]
+      );
+    },
+    // R7-1:最新 release 物件 fake(真形狀:Status + ImageRef 全名 ref)
+    releaseImage: () => {
+      calls.push("releaseImage()");
+      if (state.releaseImageThrow) throw new Error("no releases");
+      return state.releaseImageResult ?? { Status: "complete", ImageRef: "registry.fly.io/packgo-travel:deployment-NEW" };
+    },
+    // R9-1:registry manifest HEAD fake —— 回「真形狀」原始回應(status line +
+    // headers 全文),production 用共用純函式 parseRegistryDigestHeaders 解析。
+    registryManifestHead: (repository, tag) => {
+      calls.push(`registryManifestHead(${repository}:${tag})`);
+      if (state.registryHeadThrow) throw new Error("curl failed");
+      return (
+        state.registryHeadResult ??
+        "HTTP/2 200 \r\ncontent-type: application/vnd.oci.image.index.v1+json\r\ncontent-length: 856\r\ndocker-content-digest: sha256:" + "a".repeat(64) + "\r\ndate: Sun, 19 Jul 2026 21:00:00 GMT\r\n\r\n"
+      );
+    },
+    epochAnchor: () => {
+      calls.push("epochAnchor()");
+      return (
+        state.epochAnchorResult ?? {
+          ensure: "written",
+          verify: { ok: true, epochStartId: 1000, epochCount: 1, legacyRows: 337, anomalyCount: 0 },
+          anchor: { id: 1000, rowHash: "a".repeat(64) },
+        }
+      );
+    },
     rehearse: () => {
       calls.push("rehearse()");
       if (state.rehearseThrow) throw new Error("tsx failed to start");
@@ -721,4 +760,473 @@ test("真產物契約:無 .git context build 後 dist/public 含 exact HEAD sha(
     try { unlinkSync(join(ctx, "node_modules")); } catch { /* 未建立時忽略 */ }
     rmSync(ctx, { recursive: true, force: true });
   }
+});
+
+// ---- audit-chain-repair R5-2:部署後鏈錨定契約 ----
+// 錨定「絕不」在 startup;safe-deploy 證實所有機器同一新 release 後才打端點;
+// token / 機器證明 / 端點回應任一缺 → DEPLOYED_UNVERIFIED,且該情況下不得錨定。
+
+const anchorCalled = (d) => d._calls.includes("epochAnchor()");
+
+test("epoch GREEN: token 設 + 機器一致 + 錨定全綠 → machines→epochAnchor 都跑,印首錨憑證,無 DEPLOYED_UNVERIFIED", async () => {
+  const d = makeDeps({ env: { DEPLOY_TOKEN: "good-token", LOCAL_SCRIPT_TOKEN: "script-token" } });
+  const code = await runGuard(d, {});
+  assert.equal(code, 0);
+  assert.ok(d._calls.includes("machines()"), "machines consistency proof ran");
+  assert.ok(anchorCalled(d), "epoch anchor called");
+  assert.ok(d._logs.some((l) => l.includes("首錨憑證") && l.includes("rowHash=" + "a".repeat(64))));
+  assert.ok(!d._errors.some((l) => l.includes("鏈錨定") && l.includes("DEPLOYED_UNVERIFIED")));
+});
+
+test("epoch BLOCK: LOCAL_SCRIPT_TOKEN 未設 → 不錨定 + DEPLOYED_UNVERIFIED(不同於煙霧的軟跳過)", async () => {
+  const d = makeDeps(); // token unset
+  await runGuard(d, {});
+  assert.equal(anchorCalled(d), false);
+  assert.ok(d._errors.some((l) => l.includes("DEPLOYED_UNVERIFIED") && l.includes("鏈錨定無法執行")));
+});
+
+test("epoch BLOCK: 機器 image 不一致(rolling 未退場)→ 絕不呼叫錨定端點 + DEPLOYED_UNVERIFIED", async () => {
+  const d = makeDeps({
+    env: { DEPLOY_TOKEN: "good-token", LOCAL_SCRIPT_TOKEN: "script-token" },
+    machinesResult: [
+      { state: "started", image_ref: { registry: "registry.fly.io", repository: "packgo-travel", tag: "deployment-NEW", digest: "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" } },
+      { state: "started", image_ref: { registry: "registry.fly.io", repository: "packgo-travel", tag: "deployment-OLD", digest: "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb" } },
+    ],
+  });
+  await runGuard(d, {});
+  assert.equal(anchorCalled(d), false, "must NOT anchor while old release machines are alive");
+  assert.ok(d._errors.some((l) => l.includes("DEPLOYED_UNVERIFIED") && l.includes("未全數以 immutable digest 綁定")));
+});
+
+test("epoch BLOCK: 錨定端點回 verify.ok=false → DEPLOYED_UNVERIFIED", async () => {
+  const d = makeDeps({
+    env: { DEPLOY_TOKEN: "good-token", LOCAL_SCRIPT_TOKEN: "script-token" },
+    epochAnchorResult: {
+      ensure: "exists",
+      verify: { ok: false, epochStartId: 1000, epochCount: 1, legacyRows: 337, anomalyCount: 2 },
+      anchor: { id: 1000, rowHash: "aabb" },
+    },
+  });
+  await runGuard(d, {});
+  assert.ok(d._errors.some((l) => l.includes("DEPLOYED_UNVERIFIED") && l.includes("鏈錨定/驗證未全綠")));
+});
+
+test("epoch BLOCK: epochCount=2(重錨警訊)→ DEPLOYED_UNVERIFIED", async () => {
+  const d = makeDeps({
+    env: { DEPLOY_TOKEN: "good-token", LOCAL_SCRIPT_TOKEN: "script-token" },
+    epochAnchorResult: {
+      ensure: "exists",
+      verify: { ok: true, epochStartId: 2000, epochCount: 2, legacyRows: 400, anomalyCount: 0 },
+      anchor: { id: 2000, rowHash: "ccdd" },
+    },
+  });
+  await runGuard(d, {});
+  assert.ok(d._errors.some((l) => l.includes("DEPLOYED_UNVERIFIED") && l.includes("epochCount=2")));
+});
+
+test("epoch BLOCK: ensure=failed(錨列沒落地)→ DEPLOYED_UNVERIFIED", async () => {
+  const d = makeDeps({
+    env: { DEPLOY_TOKEN: "good-token", LOCAL_SCRIPT_TOKEN: "script-token" },
+    epochAnchorResult: {
+      ensure: "failed",
+      verify: { ok: false, epochStartId: null, epochCount: 0, legacyRows: 0, anomalyCount: 287 },
+      anchor: null,
+    },
+  });
+  await runGuard(d, {});
+  assert.ok(d._errors.some((l) => l.includes("DEPLOYED_UNVERIFIED") && l.includes("ensure=failed")));
+});
+
+test("epoch DRY-RUN: 不部署也不錨定(machines/epochAnchor 都不跑)", async () => {
+  const d = makeDeps({ env: { DEPLOY_TOKEN: "good-token", LOCAL_SCRIPT_TOKEN: "script-token" } });
+  await runGuard(d, { dryRun: true });
+  assert.equal(d._calls.includes("machines()"), false);
+  assert.equal(anchorCalled(d), false);
+});
+
+// ---- R6-2:image 綁定 + 回應形狀嚴格判準 ----
+
+test("epoch BLOCK(R6-2): 全部機器都是舊 image(old-only)→ 不錨定 + DEPLOYED_UNVERIFIED", async () => {
+  const d = makeDeps({
+    env: { DEPLOY_TOKEN: "good-token", LOCAL_SCRIPT_TOKEN: "script-token" },
+    releaseImageResult: { Status: "complete", ImageRef: "registry.fly.io/packgo-travel:deployment-NEW" },
+    machinesResult: [{ state: "started", image_ref: { registry: "registry.fly.io", repository: "packgo-travel", tag: "deployment-OLD", digest: "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb" } }],
+  });
+  await runGuard(d, {});
+  assert.equal(anchorCalled(d), false, "old-only machines must never anchor");
+  assert.ok(d._errors.some((l) => l.includes("DEPLOYED_UNVERIFIED") && l.includes("未全數以 immutable digest 綁定")));
+});
+
+test("epoch BLOCK(R6-2): 新機 started + 舊機 stopping(過渡)→ 不錨定", async () => {
+  const d = makeDeps({
+    env: { DEPLOY_TOKEN: "good-token", LOCAL_SCRIPT_TOKEN: "script-token" },
+    releaseImageResult: { Status: "complete", ImageRef: "registry.fly.io/packgo-travel:deployment-NEW" },
+    machinesResult: [
+      { state: "started", image_ref: { registry: "registry.fly.io", repository: "packgo-travel", tag: "deployment-NEW", digest: "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" } },
+      { state: "stopping", image_ref: { registry: "registry.fly.io", repository: "packgo-travel", tag: "deployment-OLD", digest: "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb" } },
+    ],
+  });
+  await runGuard(d, {});
+  assert.equal(anchorCalled(d), false, "transitional old machine must block anchoring");
+});
+
+test("epoch BLOCK(R6-2): releaseImage 取不到(fail-closed)→ 不錨定 + DEPLOYED_UNVERIFIED", async () => {
+  const d = makeDeps({
+    env: { DEPLOY_TOKEN: "good-token", LOCAL_SCRIPT_TOKEN: "script-token" },
+    releaseImageThrow: true,
+  });
+  await runGuard(d, {});
+  assert.equal(anchorCalled(d), false);
+  assert.ok(d._errors.some((l) => l.includes("DEPLOYED_UNVERIFIED") && l.includes("鏈錨定步驟失敗")));
+});
+
+test("epoch BLOCK(R6-2): anchor 缺 id(malformed)→ DEPLOYED_UNVERIFIED", async () => {
+  const d = makeDeps({
+    env: { DEPLOY_TOKEN: "good-token", LOCAL_SCRIPT_TOKEN: "script-token" },
+    epochAnchorResult: {
+      ensure: "exists",
+      verify: { ok: true, epochStartId: 1000, epochCount: 1, legacyRows: 337, anomalyCount: 0 },
+      anchor: { rowHash: "a".repeat(64) }, // 缺 id
+    },
+  });
+  await runGuard(d, {});
+  assert.ok(d._errors.some((l) => l.includes("DEPLOYED_UNVERIFIED") && l.includes("鏈錨定/驗證未全綠")));
+});
+
+test("epoch BLOCK(R6-2): anchor.id 與 epochStartId 不一致 → DEPLOYED_UNVERIFIED", async () => {
+  const d = makeDeps({
+    env: { DEPLOY_TOKEN: "good-token", LOCAL_SCRIPT_TOKEN: "script-token" },
+    epochAnchorResult: {
+      ensure: "exists",
+      verify: { ok: true, epochStartId: 1000, epochCount: 1, legacyRows: 337, anomalyCount: 0 },
+      anchor: { id: 999, rowHash: "a".repeat(64) },
+    },
+  });
+  await runGuard(d, {});
+  assert.ok(d._errors.some((l) => l.includes("DEPLOYED_UNVERIFIED") && l.includes("anchorId=999")));
+});
+
+test("epoch BLOCK(R6-2): rowHash 非 64-hex → DEPLOYED_UNVERIFIED", async () => {
+  const d = makeDeps({
+    env: { DEPLOY_TOKEN: "good-token", LOCAL_SCRIPT_TOKEN: "script-token" },
+    epochAnchorResult: {
+      ensure: "exists",
+      verify: { ok: true, epochStartId: 1000, epochCount: 1, legacyRows: 337, anomalyCount: 0 },
+      anchor: { id: 1000, rowHash: "not-a-hash" },
+    },
+  });
+  await runGuard(d, {});
+  assert.ok(d._errors.some((l) => l.includes("DEPLOYED_UNVERIFIED") && l.includes("hash64hex=false")));
+});
+
+test("epoch BLOCK(R6-2): epochStartId=null → DEPLOYED_UNVERIFIED(不因 anchor null 而放行)", async () => {
+  const d = makeDeps({
+    env: { DEPLOY_TOKEN: "good-token", LOCAL_SCRIPT_TOKEN: "script-token" },
+    epochAnchorResult: {
+      ensure: "written",
+      verify: { ok: true, epochStartId: null, epochCount: 0, legacyRows: 0, anomalyCount: 0 },
+      anchor: null,
+    },
+  });
+  await runGuard(d, {});
+  assert.ok(d._errors.some((l) => l.includes("DEPLOYED_UNVERIFIED") && l.includes("鏈錨定/驗證未全綠")));
+});
+
+test("epoch BLOCK(R6-2): 殘留異常(anomalyCount>0)→ DEPLOYED_UNVERIFIED", async () => {
+  const d = makeDeps({
+    env: { DEPLOY_TOKEN: "good-token", LOCAL_SCRIPT_TOKEN: "script-token" },
+    epochAnchorResult: {
+      ensure: "exists",
+      verify: { ok: true, epochStartId: 1000, epochCount: 1, legacyRows: 337, anomalyCount: 3 },
+      anchor: { id: 1000, rowHash: "a".repeat(64) },
+    },
+  });
+  await runGuard(d, {});
+  assert.ok(d._errors.some((l) => l.includes("DEPLOYED_UNVERIFIED") && l.includes("anomalies=3")));
+});
+
+// ---- R7-1:image identity 正規化五組 ----
+
+test("R7-1 GREEN: 真實形狀 —— release ImageRef 帶 @sha256 後綴 + machine digest 相符 → 錨定執行", async () => {
+  const d = makeDeps({
+    env: { DEPLOY_TOKEN: "good-token", LOCAL_SCRIPT_TOKEN: "script-token" },
+    releaseImageResult: { Status: "complete", ImageRef: "registry.fly.io/packgo-travel:deployment-NEW@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" },
+    // machines 預設:同 tag deployment-NEW、digest sha256:samedigest → 相符
+  });
+  const code = await runGuard(d, {});
+  assert.equal(code, 0);
+  assert.ok(anchorCalled(d), "normalized identities must match and anchor");
+  assert.ok(!d._errors.some((l) => l.includes("未全數以 immutable digest 綁定")));
+});
+
+test("R7-1 BLOCK: 同 digest 但 state=stopping 的機器 → 擋(同 image 過渡機不放行)", async () => {
+  const d = makeDeps({
+    env: { DEPLOY_TOKEN: "good-token", LOCAL_SCRIPT_TOKEN: "script-token" },
+    machinesResult: [
+      { state: "started", image_ref: { registry: "registry.fly.io", repository: "packgo-travel", tag: "deployment-NEW", digest: "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" } },
+      { state: "stopping", image_ref: { registry: "registry.fly.io", repository: "packgo-travel", tag: "deployment-NEW", digest: "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" } },
+    ],
+  });
+  await runGuard(d, {});
+  assert.equal(anchorCalled(d), false, "same-digest transitional machine must still block");
+  assert.ok(d._errors.some((l) => l.includes("未全數以 immutable digest 綁定")));
+});
+
+test("R7-1 BLOCK: unknown state 機器 → 擋", async () => {
+  const d = makeDeps({
+    env: { DEPLOY_TOKEN: "good-token", LOCAL_SCRIPT_TOKEN: "script-token" },
+    machinesResult: [
+      { state: "started", image_ref: { registry: "registry.fly.io", repository: "packgo-travel", tag: "deployment-NEW", digest: "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" } },
+      { state: "replacing", image_ref: { registry: "registry.fly.io", repository: "packgo-travel", tag: "deployment-NEW", digest: "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" } },
+    ],
+  });
+  await runGuard(d, {});
+  assert.equal(anchorCalled(d), false);
+});
+
+test("R7-1 BLOCK: 舊 digest(release 帶 digest、machine digest 不符)→ 擋", async () => {
+  const d = makeDeps({
+    env: { DEPLOY_TOKEN: "good-token", LOCAL_SCRIPT_TOKEN: "script-token" },
+    releaseImageResult: { Status: "complete", ImageRef: "registry.fly.io/packgo-travel:deployment-NEW@sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee" },
+    machinesResult: [
+      { state: "started", image_ref: { registry: "registry.fly.io", repository: "packgo-travel", tag: "deployment-NEW", digest: "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb" } },
+    ],
+  });
+  await runGuard(d, {});
+  assert.equal(anchorCalled(d), false);
+});
+
+test("R7-1 BLOCK: 最新 release 非 complete → fail-closed 擋(不錨定)", async () => {
+  const d = makeDeps({
+    env: { DEPLOY_TOKEN: "good-token", LOCAL_SCRIPT_TOKEN: "script-token" },
+    releaseImageResult: { Status: "pending", ImageRef: "registry.fly.io/packgo-travel:deployment-NEW" },
+  });
+  await runGuard(d, {});
+  assert.equal(anchorCalled(d), false);
+  assert.ok(d._errors.some((l) => l.includes("DEPLOYED_UNVERIFIED") && l.includes("鏈錨定步驟失敗")));
+});
+
+// ---- R8-1:immutable digest 綁定五組 ----
+
+const D64A = "sha256:" + "a".repeat(64);
+const D64B = "sha256:" + "b".repeat(64);
+
+test("R8-1 GREEN: tag-only release → 權威解析 tag→digest,machines digest exact 相等 → 錨定", async () => {
+  const d = makeDeps({ env: { DEPLOY_TOKEN: "good-token", LOCAL_SCRIPT_TOKEN: "script-token" } });
+  const code = await runGuard(d, {});
+  assert.equal(code, 0);
+  assert.ok(d._calls.some((c) => String(c).startsWith("registryManifestHead(packgo-travel:deployment-NEW")), "tag-only must resolve digest from registry authority");
+  assert.ok(anchorCalled(d));
+});
+
+test("R8-1 BLOCK: tag-only 且解析出的 digest 與 machines 不符 → 擋(machines 彼此一致也不放行)", async () => {
+  const d = makeDeps({
+    env: { DEPLOY_TOKEN: "good-token", LOCAL_SCRIPT_TOKEN: "script-token" },
+    registryHeadResult: "HTTP/2 200 \r\ncontent-type: application/vnd.oci.image.index.v1+json\r\ndocker-content-digest: " + D64B + "\r\n\r\n", // 權威(registry)說 B,machines 全是 A(彼此一致)
+  });
+  await runGuard(d, {});
+  assert.equal(anchorCalled(d), false, "mutually-consistent but wrong digest must block");
+  assert.ok(d._errors.some((l) => l.includes("未全數以 immutable digest 綁定")));
+});
+
+test("R8-1 BLOCK: tag-only 且 digest 解析不到 → fail-closed 擋", async () => {
+  const d = makeDeps({
+    env: { DEPLOY_TOKEN: "good-token", LOCAL_SCRIPT_TOKEN: "script-token" },
+    registryHeadThrow: true,
+  });
+  await runGuard(d, {});
+  assert.equal(anchorCalled(d), false);
+  assert.ok(d._errors.some((l) => l.includes("DEPLOYED_UNVERIFIED") && l.includes("鏈錨定步驟失敗")));
+});
+
+test("R8-1 BLOCK: malformed digest(sha256: 空值/非 64-hex)→ 擋", async () => {
+  const d = makeDeps({
+    env: { DEPLOY_TOKEN: "good-token", LOCAL_SCRIPT_TOKEN: "script-token" },
+    machinesResult: [
+      { state: "started", image_ref: { registry: "registry.fly.io", repository: "packgo-travel", tag: "deployment-NEW", digest: "sha256:" } },
+    ],
+  });
+  await runGuard(d, {});
+  assert.equal(anchorCalled(d), false, "sha256: empty digest must not pass");
+});
+
+test("R8-1 GREEN: tagless machine object(只有 registry/repository/digest,無 tag)→ digest 相符即合格,不 false-red", async () => {
+  const d = makeDeps({
+    env: { DEPLOY_TOKEN: "good-token", LOCAL_SCRIPT_TOKEN: "script-token" },
+    machinesResult: [
+      { state: "started", image_ref: { registry: "registry.fly.io", repository: "packgo-travel", digest: D64A } },
+    ],
+  });
+  const code = await runGuard(d, {});
+  assert.equal(code, 0);
+  assert.ok(anchorCalled(d), "tagless-but-matching-digest machine must not false-red");
+});
+
+test("R8-1 BLOCK: mixed digest(一台 A 一台 B)→ 擋", async () => {
+  const d = makeDeps({
+    env: { DEPLOY_TOKEN: "good-token", LOCAL_SCRIPT_TOKEN: "script-token" },
+    machinesResult: [
+      { state: "started", image_ref: { registry: "registry.fly.io", repository: "packgo-travel", tag: "deployment-NEW", digest: D64A } },
+      { state: "started", image_ref: { registry: "registry.fly.io", repository: "packgo-travel", tag: "deployment-NEW", digest: D64B } },
+    ],
+  });
+  await runGuard(d, {});
+  assert.equal(anchorCalled(d), false);
+});
+
+// ---- R9-1:parseRegistryDigestHeaders 真形狀 fixture(共用 production 純函式)----
+import { parseRegistryDigestHeaders } from "./safe-deploy.mjs";
+
+test("R9-1 parser: 真形狀 200 回應(HTTP/2 + OCI headers)→ 解析出 64-hex digest", () => {
+  const fixture =
+    "HTTP/2 200 \r\n" +
+    "content-type: application/vnd.oci.image.index.v1+json\r\n" +
+    "docker-distribution-api-version: registry/2.0\r\n" +
+    "docker-content-digest: sha256:" + "9c".repeat(32) + "\r\n" +
+    "content-length: 856\r\n" +
+    "date: Sun, 19 Jul 2026 21:00:00 GMT\r\n\r\n";
+  assert.equal(parseRegistryDigestHeaders(fixture), "sha256:" + "9c".repeat(32));
+});
+
+test("R9-1 parser: 401 未授權 → throw(fail-closed,不猜)", () => {
+  const fixture = "HTTP/2 401 \r\nwww-authenticate: Basic realm=\"registry\"\r\n\r\n";
+  assert.throws(() => parseRegistryDigestHeaders(fixture), /not 200/);
+});
+
+test("R9-1 parser: 200 但缺 docker-content-digest → throw", () => {
+  const fixture = "HTTP/2 200 \r\ncontent-type: application/vnd.oci.image.index.v1+json\r\n\r\n";
+  assert.throws(() => parseRegistryDigestHeaders(fixture), /exactly one valid docker-content-digest/);
+});
+
+test("R9-1 parser: 307 redirect → throw(不跟隨,不接受非 200)", () => {
+  const fixture = "HTTP/1.1 307 Temporary Redirect\r\nlocation: https://elsewhere/\r\n\r\n";
+  assert.throws(() => parseRegistryDigestHeaders(fixture), /not 200/);
+});
+
+test("R9-1 parser: digest 非 64-hex(截斷)→ throw", () => {
+  const fixture = "HTTP/2 200 \r\ncontent-type: application/vnd.oci.image.index.v1+json\r\ndocker-content-digest: sha256:abc123\r\n\r\n";
+  assert.throws(() => parseRegistryDigestHeaders(fixture), /exactly one valid docker-content-digest/);
+});
+
+// ---- R10-1:tag 大小寫保留 + parser terminal-block 嚴格化 ----
+
+test("R10-1 GREEN: uppercase ULID tag(Fly 真形狀 deployment-01JHZ…)→ registry 查詢用原大小寫 tag", async () => {
+  const d = makeDeps({
+    env: { DEPLOY_TOKEN: "good-token", LOCAL_SCRIPT_TOKEN: "script-token" },
+    releaseImageResult: { Status: "complete", ImageRef: "registry.fly.io/packgo-travel:deployment-01JHZXK7M9QRSTUVWX" },
+    machinesResult: [
+      { state: "started", image_ref: { registry: "registry.fly.io", repository: "packgo-travel", tag: "deployment-01JHZXK7M9QRSTUVWX", digest: D64A } },
+    ],
+  });
+  const code = await runGuard(d, {});
+  assert.equal(code, 0);
+  assert.ok(
+    d._calls.includes("registryManifestHead(packgo-travel:deployment-01JHZXK7M9QRSTUVWX)"),
+    `exact-case tag must reach registry; calls=${d._calls.filter((c) => String(c).startsWith("registry"))}`,
+  );
+  assert.ok(anchorCalled(d));
+});
+
+test("R10-1 BLOCK: machine tag 與 release tag 大小寫不同(不同 tag)→ 擋", async () => {
+  const d = makeDeps({
+    env: { DEPLOY_TOKEN: "good-token", LOCAL_SCRIPT_TOKEN: "script-token" },
+    releaseImageResult: { Status: "complete", ImageRef: "registry.fly.io/packgo-travel:deployment-01JHZABC" },
+    machinesResult: [
+      { state: "started", image_ref: { registry: "registry.fly.io", repository: "packgo-travel", tag: "deployment-01jhzabc", digest: D64A } },
+    ],
+  });
+  await runGuard(d, {});
+  assert.equal(anchorCalled(d), false, "case-mismatched tag is a different OCI tag — must block");
+});
+
+test("R10-1 parser: proxy CONNECT 200 + origin 401 → 只認 terminal block,throw", () => {
+  const fixture =
+    "HTTP/1.1 200 Connection established\r\n\r\n" +
+    "HTTP/2 401 \r\nwww-authenticate: Basic realm=\"registry\"\r\n\r\n";
+  assert.throws(() => parseRegistryDigestHeaders(fixture), /terminal response not 200/);
+});
+
+test("R10-1 parser: proxy CONNECT 200 + origin 200 合法 → 取 terminal digest", () => {
+  const fixture =
+    "HTTP/1.1 200 Connection established\r\n\r\n" +
+    "HTTP/2 200 \r\ncontent-type: application/vnd.oci.image.index.v1+json\r\ndocker-content-digest: " + D64A + "\r\n\r\n";
+  assert.equal(parseRegistryDigestHeaders(fixture), D64A);
+});
+
+test("R10-1 parser: 兩個衝突 digest → throw(必須恰好一個)", () => {
+  const fixture =
+    "HTTP/2 200 \r\ncontent-type: application/vnd.oci.image.index.v1+json\r\n" +
+    "docker-content-digest: " + D64A + "\r\ndocker-content-digest: " + D64B + "\r\n\r\n";
+  assert.throws(() => parseRegistryDigestHeaders(fixture), /exactly one valid/);
+});
+
+test("R10-1 parser: text/html + digest → throw(media type 不是 manifest)", () => {
+  const fixture = "HTTP/2 200 \r\ncontent-type: text/html\r\ndocker-content-digest: " + D64A + "\r\n\r\n";
+  assert.throws(() => parseRegistryDigestHeaders(fixture), /not a manifest media type/);
+});
+
+// ---- R11-1:Content-Type cardinality ----
+
+test("R11-1 parser: 重複衝突 Content-Type(合法在前 + text/html 在後)→ throw", () => {
+  const fixture =
+    "HTTP/2 200 \r\ncontent-type: application/vnd.oci.image.index.v1+json\r\ncontent-type: text/html\r\ndocker-content-digest: " + D64A + "\r\n\r\n";
+  assert.throws(() => parseRegistryDigestHeaders(fixture), /exactly one content-type/);
+});
+
+test("R11-1 parser: 重複衝突 Content-Type(text/html 在前 + 合法在後)→ throw", () => {
+  const fixture =
+    "HTTP/2 200 \r\ncontent-type: text/html\r\ncontent-type: application/vnd.oci.image.index.v1+json\r\ndocker-content-digest: " + D64A + "\r\n\r\n";
+  assert.throws(() => parseRegistryDigestHeaders(fixture), /exactly one content-type/);
+});
+
+test("R11-1 parser: 重複相同 Content-Type → 一樣拒(cardinality 恰一)", () => {
+  const fixture =
+    "HTTP/2 200 \r\ncontent-type: application/vnd.oci.image.index.v1+json\r\ncontent-type: application/vnd.oci.image.index.v1+json\r\ndocker-content-digest: " + D64A + "\r\n\r\n";
+  assert.throws(() => parseRegistryDigestHeaders(fixture), /exactly one content-type/);
+});
+
+// ---- R12-1:obs-fold framing ----
+
+test("R12-1 parser: mixed-case header 名(Content-Type/Docker-Content-Digest)→ 綠", () => {
+  const fixture =
+    "HTTP/2 200 \r\nContent-Type: application/vnd.oci.image.index.v1+json\r\nDocker-Content-Digest: " + D64A + "\r\n\r\n";
+  assert.equal(parseRegistryDigestHeaders(fixture), D64A);
+});
+
+test("R12-1 parser: folded value(值折行)→ 拒", () => {
+  const fixture =
+    "HTTP/2 200 \r\ncontent-type: application/vnd.oci.image.index.v1+json\r\n \tfolded-part\r\ndocker-content-digest: " + D64A + "\r\n\r\n";
+  assert.throws(() => parseRegistryDigestHeaders(fixture), /obs-fold/);
+});
+
+test("R12-1 parser: obs-fold 藏第二 Content-Type → 拒(不得假綠)", () => {
+  const fixture =
+    "HTTP/2 200 \r\ncontent-type: application/vnd.oci.image.index.v1+json\r\n content-type: text/html\r\ndocker-content-digest: " + D64A + "\r\n\r\n";
+  assert.throws(() => parseRegistryDigestHeaders(fixture), /obs-fold/);
+});
+
+test("R12-1 parser: obs-fold 藏第二 digest → 拒", () => {
+  const fixture =
+    "HTTP/2 200 \r\ncontent-type: application/vnd.oci.image.index.v1+json\r\ndocker-content-digest: " + D64A + "\r\n docker-content-digest: " + D64B + "\r\n\r\n";
+  assert.throws(() => parseRegistryDigestHeaders(fixture), /obs-fold/);
+});
+
+// ---- R13-1:raw framing(不得 trim 吞尾端純空白折行)----
+
+test("R13-1 parser: terminal 尾端純 SP continuation → 拒(trim 不得吞掉)", () => {
+  const fixture =
+    "HTTP/2 200 \r\ncontent-type: application/vnd.oci.image.index.v1+json\r\ndocker-content-digest: " + D64A + "\r\n \r\n\r\n";
+  assert.throws(() => parseRegistryDigestHeaders(fixture), /obs-fold/);
+});
+
+test("R13-1 parser: terminal 尾端純 HTAB continuation → 拒", () => {
+  const fixture =
+    "HTTP/2 200 \r\ncontent-type: application/vnd.oci.image.index.v1+json\r\ndocker-content-digest: " + D64A + "\r\n\t\r\n\r\n";
+  assert.throws(() => parseRegistryDigestHeaders(fixture), /obs-fold/);
+});
+
+test("R13-1 parser: 尾端 SP+HTAB continuation → 拒", () => {
+  const fixture =
+    "HTTP/2 200 \r\ncontent-type: application/vnd.oci.image.index.v1+json\r\ndocker-content-digest: " + D64A + "\r\n \t\r\n\r\n";
+  assert.throws(() => parseRegistryDigestHeaders(fixture), /obs-fold/);
 });

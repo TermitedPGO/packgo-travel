@@ -36,18 +36,24 @@ beforeEach(() => {
   vi.clearAllMocks();
 });
 
-/** 建一個支援 tip 查詢 + insert + update 的假 db。回傳 insert 收到的 spy。 */
+/** 建一個支援 tip 查詢 + insert + update 的假 db。回傳 insert 收到的 spy。
+ *  audit-chain-repair D2 後 tip 查詢多一段 .where(isNotNull(rowHash)),mock 鏈同步。 */
 function makeDb(insertId: number) {
   const insertValues = vi.fn().mockResolvedValue([{ insertId }]);
   const updateWhere = vi.fn().mockResolvedValue(undefined);
   const db = {
     select: () => ({
       from: () => ({
+        where: () => ({
+          orderBy: () => ({ limit: () => Promise.resolve([{ rowHash: "PREVHASH" }]) }),
+        }),
         orderBy: () => ({ limit: () => Promise.resolve([{ rowHash: "PREVHASH" }]) }),
       }),
     }),
     insert: () => ({ values: insertValues }),
     update: () => ({ set: () => ({ where: updateWhere }) }),
+    transaction: async (f: (tx: { execute: (q: unknown) => Promise<unknown> }) => Promise<unknown>) =>
+      f({ execute: async (q: unknown) => (/GET_LOCK/i.test(String((q as { queryChunks?: unknown[] })?.queryChunks?.map?.((c: unknown) => (c as { value?: string[] })?.value ?? "").join("") ?? q)) ? [[{ l: 1 }]] : [[{}]]) }),
   };
   return { db, insertValues, updateWhere };
 }
@@ -105,6 +111,7 @@ describe("systemAudit — 底層炸不外拋", () => {
     const db = {
       select: () => ({
         from: () => ({
+          where: () => ({ orderBy: () => ({ limit: () => Promise.resolve([]) }) }),
           orderBy: () => ({ limit: () => Promise.resolve([]) }),
         }),
       }),
@@ -114,6 +121,8 @@ describe("systemAudit — 底層炸不外拋", () => {
         },
       }),
       update: () => ({ set: () => ({ where: vi.fn() }) }),
+      transaction: async (f: (tx: { execute: (q: unknown) => Promise<unknown> }) => Promise<unknown>) =>
+        f({ execute: async () => [[{ l: 1 }]] }),
     };
     getDb.mockResolvedValue(db);
     await expect(

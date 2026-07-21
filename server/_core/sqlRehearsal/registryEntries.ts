@@ -1695,7 +1695,7 @@ export const ENTRIES: RehearsalEntry[] = [
   },
   {
     key: "backfill-passport-encryption.processBookingParticipantsBatch.findPlaintext",
-    sources: ["server/scripts/backfill-passport-encryption.ts:76"],
+    sources: ["server/scripts/backfill-passport-encryption.ts:72"],
     cls: "B",
     sql: "select `bookingParticipants`.`id`, `bookingParticipants`.`passportNumber` from `bookingParticipants` where (`bookingParticipants`.`passportNumber` IS NOT NULL AND `bookingParticipants`.`passportNumber` NOT LIKE 'enc:v1:%') order by `bookingParticipants`.`id` asc limit 100",
     sampleParams: [],
@@ -1704,7 +1704,7 @@ export const ENTRIES: RehearsalEntry[] = [
   },
   {
     key: "backfill-passport-encryption.processVisaApplicationsBatch.findPlaintext",
-    sources: ["server/scripts/backfill-passport-encryption.ts:107"],
+    sources: ["server/scripts/backfill-passport-encryption.ts:103"],
     cls: "B",
     sql: "select `visaApplications`.`id`, `visaApplications`.`passportNumber` from `visaApplications` where `visaApplications`.`passportNumber` NOT LIKE 'enc:v1:%' order by `visaApplications`.`id` asc limit 100",
     sampleParams: [],
