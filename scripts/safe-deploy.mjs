@@ -38,6 +38,62 @@ import { fileURLToPath } from "node:url";
 const APP = "packgo-travel";
 const HEALTH_URL = "https://packgoplay.com/health";
 const SMOKE_URL = "https://packgoplay.com/api/admin/deploy-smoke";
+// audit-chain-repair R5-2:部署後鏈錨定端點(所有機器證實同一新 release 後才打)
+const EPOCH_URL = "https://packgoplay.com/api/admin/audit-chain-epoch";
+
+/**
+ * Codex R9-1:tag→digest 的權威解析純函式。輸入是對 Fly registry v2 API 的
+ * manifest HEAD 請求原始回應(status line + headers 全文)——與 Machines 完全
+ * 無關的獨立來源(registry 本體),綁定 exact release tag。要求:
+ *   - 回應必須是 200(401/404/307 等一律 throw,fail-closed)
+ *   - 必須有 docker-content-digest 標頭且為 exact sha256:64-hex
+ * export 供測試以真形狀 fixture 驗證(不是 fake resolver oracle)。
+ */
+export function parseRegistryDigestHeaders(headersText) {
+  const text = String(headersText ?? "");
+  // Codex R10-1:proxy 環境下 curl -sI 會輸出多個 header block(CONNECT 200 →
+  // origin 回應)。只認「最後一個 HTTP block」= terminal origin response;
+  // 該 block 必須 200、manifest media type 合法、digest 恰好一個。
+  // R13-1:block 保持 raw(**不得先 trim** —— trim 會吞掉尾端「純 SP/HTAB」的
+  // obs-fold continuation,讓折行藏頭騙過 cardinality)。obs-fold 檢查對 raw
+  // 行做:首行之後任何以空白/tab 開頭的行(含整行只有空白)一律 throw,之後
+  // 才做 status/Content-Type/digest 檢查。
+  const blocks = text
+    .split(/\r?\n\r?\n/)
+    .filter((b) => /^HTTP\//i.test(b));
+  if (blocks.length === 0) throw new Error("registry response has no HTTP header block");
+  const terminal = blocks[blocks.length - 1];
+  const rawLines = terminal.split(/\r?\n/);
+  if (rawLines.slice(1).some((l) => /^[ \t]/.test(l))) {
+    throw new Error("registry response contains obs-fold header continuation — rejected (fail-closed)");
+  }
+  const statusLine = rawLines[0] ?? "";
+  if (!/^HTTP\/[\d.]+\s+200\b/i.test(statusLine)) {
+    throw new Error(`registry manifest HEAD terminal response not 200: "${statusLine.slice(0, 60)}"`);
+  }
+  // R11-1:Content-Type 必須「恰好一個」且屬 manifest allowlist —— 重複(相同或
+  // 衝突、合法在前或在後)一律拒,不容歧義回應假綠(fail-closed cardinality)。
+  const cts = [...terminal.matchAll(/^content-type:\s*([^\r\n;]+)/gim)].map((m) => m[1].trim().toLowerCase());
+  const MANIFEST_TYPES = [
+    "application/vnd.docker.distribution.manifest.v2+json",
+    "application/vnd.docker.distribution.manifest.list.v2+json",
+    "application/vnd.oci.image.manifest.v1+json",
+    "application/vnd.oci.image.index.v1+json",
+  ];
+  if (cts.length !== 1) {
+    throw new Error(`registry response must carry exactly one content-type header (got ${cts.length})`);
+  }
+  if (!MANIFEST_TYPES.includes(cts[0])) {
+    throw new Error(`registry response content-type is not a manifest media type: "${cts[0] || "(missing)"}"`);
+  }
+  // digest 必須恰好一個(重複/衝突一律拒)
+  const digests = [...terminal.matchAll(/^docker-content-digest:\s*(\S+)\s*$/gim)].map((m) => m[1].toLowerCase());
+  const valid = digests.filter((d) => /^sha256:[0-9a-f]{64}$/.test(d));
+  if (digests.length !== 1 || valid.length !== 1) {
+    throw new Error(`registry response must carry exactly one valid docker-content-digest (got ${digests.length})`);
+  }
+  return valid[0];
+}
 const APPROVE_FILE = ".deploy-approve";
 // Full flyctl-deploy output is tee'd here when a deploy fails, so the failure
 // can be read from a file (by the monitor / next session) instead of only
@@ -375,6 +431,128 @@ async function guardInner(deps, opts) {
     }
   }
 
+  // audit-chain-repair R5-2 — 部署後鏈錨定。順序有硬性理由:Fly rolling 會先啟
+  // 新機再停舊機,startup 錨定會讓舊 release 的舊口徑寫入落在新錨之後,立即污染
+  // post-epoch 段。所以:(1) 先以 flyctl machines list --json 證實所有 started
+  // 機器都跑同一個 image(release 全退場證明,不用 sleep 充數);(2) 才打
+  // LOCAL_SCRIPT_TOKEN 保護的錨定端點;(3) 端點回的 verify 必須 ok 且
+  // epochCount=1 才算綠。token / machines 證明 / 端點 / 驗證任一缺 →
+  // DEPLOYED_UNVERIFIED(1A0b 不得開)。首錨 {id,rowHash} 印出供 repo 外封存。
+  if (!env.LOCAL_SCRIPT_TOKEN) {
+    verificationFailed = true;
+    error("  ⛔ DEPLOYED_UNVERIFIED — LOCAL_SCRIPT_TOKEN 未設,鏈錨定無法執行;1A0b 不得開。");
+  } else {
+    try {
+      // Codex R7-1:release 與 machine 的 image 身分必須正規化到同一 immutable
+      // identity 再比對,且機械證實選中的是本次 complete release。
+      // - release(flyctl releases --json 最新一筆):必須 Status=complete;
+      //   ImageRef 形如 "registry.fly.io/packgo-travel:deployment-XXXX"(可能帶
+      //   "@sha256:…" 後綴)。
+      // - machine(flyctl machines list --json):image_ref 是物件
+      //   {registry, repository, tag, digest}。
+      // 比對規則:machine 全名 ref(registry/repository:tag,lowercase)===
+      // release ref(去 digest 後綴,lowercase);release 若帶 digest 則 machine
+      // digest 也必須相等;所有回傳機器一律 state==="started"(stopping/
+      // unknown/過渡機即擋,同 image 也不放行);全機 digest 唯一且為 sha256:。
+      // Codex R8-1:期望 digest 必須來自本次 exact release/deploy artifact 的
+      // 合法 64-hex;tag-only release 必須解析到 digest,取不到即紅(fail-closed,
+      // 絕不拿「machines 彼此一致」充當 release 綁定)。
+      const DIGEST_RE = /^sha256:[0-9a-f]{64}$/;
+      // Codex R10-1:tag 保留原大小寫(Fly 的 deployment-<ULID> tag 含大寫;OCI
+      // tag 大小寫敏感,registry <reference> 必須用原 tag)。只正規化 registry/
+      // repository(host/path 大小寫不敏感)與 digest(hex)。
+      const parseRef = (raw) => {
+        let s = String(raw);
+        let digest = null;
+        const at = s.indexOf("@sha256:");
+        if (at !== -1) {
+          digest = s.slice(at + 1).toLowerCase();
+          s = s.slice(0, at);
+        }
+        const colon = s.lastIndexOf(":");
+        const path = colon === -1 ? s : s.slice(0, colon);
+        const tag = colon === -1 ? "" : s.slice(colon + 1); // 原大小寫
+        return { path: path.toLowerCase(), tag, ref: `${path.toLowerCase()}:${tag}`, digest };
+      };
+      const release = deps.releaseImage();
+      const relStatus = String(release?.Status ?? release?.status ?? "").toLowerCase();
+      if (relStatus !== "complete") {
+        throw new Error(`latest release status is "${relStatus || "?"}" — not complete`);
+      }
+      const rawRef = release?.ImageRef ?? release?.image_ref ?? release?.imageRef;
+      if (!rawRef) throw new Error("latest release has no image ref");
+      const rel = parseRef(rawRef);
+      let expectedDigest = rel.digest;
+      if (!expectedDigest) {
+        // R9-1:tag-only → 問 registry 本體(與 Machines 無關的獨立權威):
+        // 以本次 release 的 exact repository:tag 對 registry v2 API 做 manifest
+        // HEAD,由共用純函式解析 docker-content-digest。取不到即 throw →
+        // DEPLOYED_UNVERIFIED。絕不從 machines 同源資料推 digest。
+        // repository 用正規化 path、tag 用**原大小寫**(R10-1:ULID tag 含大寫)
+        const repository = rel.path.replace(/^registry\.fly\.io\//, "");
+        const tag = rel.tag;
+        if (!repository || !tag) throw new Error(`cannot split repository:tag from ${rel.ref}`);
+        expectedDigest = parseRegistryDigestHeaders(deps.registryManifestHead(repository, tag));
+      }
+      expectedDigest = String(expectedDigest ?? "").toLowerCase();
+      if (!DIGEST_RE.test(expectedDigest)) {
+        throw new Error(`cannot resolve a valid immutable digest for release ${rel.ref.slice(0, 48)}…`);
+      }
+      const machines = deps.machines();
+      const all = Array.isArray(machines) ? machines : [];
+      const bad = all.filter((m) => {
+        if (m?.state !== "started") return true;
+        const ir = m?.image_ref ?? {};
+        const digest = String(ir.digest ?? "").toLowerCase();
+        if (!DIGEST_RE.test(digest) || digest !== expectedDigest) return true; // 主判準:immutable digest exact 相等
+        // tag 為 optional(Fly Machines API image_ref 可無 tag);有 tag 才另比:
+        // registry/repository 正規化比對、tag 保留原大小寫 exact 比對(R10-1)
+        if (ir.tag != null) {
+          const mPath = `${ir.registry}/${ir.repository}`.toLowerCase();
+          if (mPath !== rel.path || String(ir.tag) !== rel.tag) return true;
+        }
+        return false;
+      });
+      if (all.length === 0 || bad.length > 0) {
+        verificationFailed = true;
+        error(
+          `  ⛔ DEPLOYED_UNVERIFIED — 機器未全數以 immutable digest 綁定本次 complete release` +
+            `(machines=${all.length}, 不合格=${bad.length},` +
+            ` expectedDigest=${expectedDigest.slice(0, 20)}…);未錨定,1A0b 不得開。`,
+        );
+      } else {
+        log(`\n  機器一致性:${all.length} 台全部 started 且 digest=${expectedDigest.slice(0, 20)}…(本次 release ${rel.ref.slice(0, 48)}…)`);
+        const anchor = deps.epochAnchor();
+        const v = anchor?.verify;
+        log(
+          `  鏈錨定 → ensure: ${anchor?.ensure} / ok: ${v?.ok} / epochCount: ${v?.epochCount}` +
+            ` / epochStartId: ${v?.epochStartId} / legacyRows: ${v?.legacyRows} / anomalies: ${v?.anomalyCount}`,
+        );
+        // Codex R6-2(P1-3):回應形狀嚴格判準 —— 缺 id、id 不合、非 64-hex、
+        // epochStartId null、殘留異常,全部擋。
+        const ensureOk = anchor?.ensure === "written" || anchor?.ensure === "exists";
+        const idOk =
+          Number.isInteger(v?.epochStartId) && v.epochStartId > 0 &&
+          Number.isInteger(anchor?.anchor?.id) && anchor.anchor.id === v.epochStartId;
+        const hashOk = typeof anchor?.anchor?.rowHash === "string" && /^[0-9a-f]{64}$/.test(anchor.anchor.rowHash);
+        if (!ensureOk || v?.ok !== true || v?.epochCount !== 1 || v?.anomalyCount !== 0 || !idOk || !hashOk) {
+          verificationFailed = true;
+          error(
+            "  ⛔ DEPLOYED_UNVERIFIED — 鏈錨定/驗證未全綠" +
+              `(ensure=${anchor?.ensure}, ok=${v?.ok}, epochCount=${v?.epochCount},` +
+              ` anomalies=${v?.anomalyCount}, epochStartId=${v?.epochStartId},` +
+              ` anchorId=${anchor?.anchor?.id}, hash64hex=${hashOk});1A0b 不得開。`,
+          );
+        } else {
+          log(`  首錨憑證(封存到 repo 外 evidence 檔核對用):id=${anchor.anchor.id} rowHash=${anchor.anchor.rowHash}`);
+        }
+      }
+    } catch (e) {
+      verificationFailed = true;
+      error(`  ⛔ DEPLOYED_UNVERIFIED — 鏈錨定步驟失敗:${short(e)};1A0b 不得開。`);
+    }
+  }
+
   // print deployed version
   try {
     const rel = String(run(`flyctl releases -a ${APP}`));
@@ -472,6 +650,38 @@ function makeRealDeps() {
       JSON.parse(
         String(
           run(`curl -s -m 20 -X POST -H "Authorization: Bearer $LOCAL_SCRIPT_TOKEN" ${SMOKE_URL}`, {
+            env: process.env,
+          }),
+        ),
+      ),
+    // audit-chain-repair R5-2/R6-2 — 機器綁定本次 release image 的證明 + 鏈錨定。
+    // token 同 smoke 範式:shell 內 $VAR 展開,指令字串不含 token。
+    machines: () => JSON.parse(String(run(`flyctl machines list -a ${APP} --json`))),
+    // 本次 deploy 的最新 release 物件(R7-1:上層驗 Status=complete 並正規化
+    // ImageRef;缺欄位/非 complete 一律 throw → DEPLOYED_UNVERIFIED,fail-closed)。
+    releaseImage: () => {
+      const rel = JSON.parse(String(run(`flyctl releases -a ${APP} --json`)));
+      const latest = Array.isArray(rel) ? rel[0] : null;
+      if (!latest) throw new Error("flyctl releases --json returned no releases");
+      return latest;
+    },
+    // R9-1:對 Fly registry v2 API 做 manifest HEAD(獨立於 Machines 的權威)。
+    // token 經 flyctl auth token 取得後只進子行程 env($FLY_TOKEN 展開),指令
+    // 字串與 log 均不含 token(同 LOCAL_SCRIPT_TOKEN 範式)。回傳原始回應
+    // (status line + headers),由共用純函式 parseRegistryDigestHeaders 解析。
+    registryManifestHead: (repository, tag) => {
+      const token = String(run(`flyctl auth token`)).trim();
+      return String(
+        run(
+          `curl -sI -H "Accept: application/vnd.docker.distribution.manifest.v2+json, application/vnd.oci.image.manifest.v1+json, application/vnd.oci.image.index.v1+json" -u "x:$FLY_TOKEN" https://registry.fly.io/v2/${repository}/manifests/${tag}`,
+          { env: { ...process.env, FLY_TOKEN: token } },
+        ),
+      );
+    },
+    epochAnchor: () =>
+      JSON.parse(
+        String(
+          run(`curl -s -m 20 -X POST -H "Authorization: Bearer $LOCAL_SCRIPT_TOKEN" ${EPOCH_URL}`, {
             env: process.env,
           }),
         ),

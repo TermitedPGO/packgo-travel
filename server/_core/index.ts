@@ -1447,6 +1447,46 @@ async function startServer() {
     }
   });
 
+  // audit-chain-repair R5-2 — 部署後鏈錨定。safe-deploy 在證實所有機器都是新
+  // release 後呼叫;不在 startup 錨定(rolling window 內舊 release 仍可能寫入
+  // 舊口徑列,污染 post-epoch 段)。同 deploy-smoke 的 LOCAL_SCRIPT_TOKEN 範式。
+  // POST /api/admin/audit-chain-epoch
+  //   Headers: Authorization: Bearer <LOCAL_SCRIPT_TOKEN>
+  //   Returns: { ensure: "written"|"exists"|"skipped"|"failed",
+  //              verify: { ok, epochStartId, epochCount, legacyRows, anomalyCount },
+  //              anchor: { id, rowHash } | null }   ← 首錨憑證,供 repo 外封存核對
+  //   回應零客戶資料 — 只有鏈統計與錨列 id/hash。
+  {
+    const { makeAuditChainEpochHandler } = await import("./auditChainEpochEndpoint");
+    backendPost(
+      "/api/admin/audit-chain-epoch",
+      makeAuditChainEpochHandler({
+        verifyAuth: (req, res) =>
+          verifyInternalAuth(req, res, {
+            tokenEnvVar: "LOCAL_SCRIPT_TOKEN",
+            rateLimitKey: "audit-chain-epoch",
+            rateLimitMax: 20,
+            windowSec: 3600,
+          }),
+        ensure: async () => (await import("./auditLog")).ensureAuditChainEpoch(),
+        verify: async () => (await import("./auditLog")).verifyAuditChain(),
+        getAnchorRow: async (id) => {
+          const { getDb } = await import("../db");
+          const { adminAuditLog } = await import("../../drizzle/schema");
+          const { eq } = await import("drizzle-orm");
+          const db = await getDb();
+          if (!db) return null;
+          const [row] = await db
+            .select({ id: adminAuditLog.id, rowHash: adminAuditLog.rowHash })
+            .from(adminAuditLog)
+            .where(eq(adminAuditLog.id, id))
+            .limit(1);
+          return row?.rowHash ? { id: row.id, rowHash: row.rowHash } : null;
+        },
+      }),
+    );
+  }
+
   // 批十一 塊A — 案件夾文件進場:掃已匯入案件的 交付/ 與 來源/,逐檔上傳 R2 並寫
   // customerDocuments(掛該案訂單、uploadedBy='case_import')。同 import-case-file 的
   // dry_run/confirm 兩段 + LOCAL_SCRIPT_TOKEN。⛔ 硬紅線:文件 key 一律 customer-docs/,
@@ -2109,6 +2149,12 @@ async function startServer() {
   // storefront-split Phase 0 — cron schedulers + their BullMQ workers. Ops
   // role only; a STOREFRONT_MODE process schedules nothing (bootPlan.startCron).
   if (bootPlan.startCron) {
+    // audit-chain-repair R5-2:鏈錨定「不在 startup 做」。Fly rolling 部署會先啟
+    // 新機再停舊機 —— startup 錨定的瞬間舊 release 還活著,舊口徑列可能寫在新錨
+    // 之後,立即污染 post-epoch 段。錨定改由 safe-deploy 在證實所有機器都是新
+    // release 後,呼叫 LOCAL_SCRIPT_TOKEN 保護的 /api/admin/audit-chain-epoch
+    // 端點觸發(見 backendPost 註冊處)。
+
     // Schedule zombie task cleanup every 10 minutes (timeout: 25 min)
     // Round 36-Fix-2: 從 5 分鐘延長到 25 分鐘，避免誤殺正在執行的任務
     // 排程間隔從 5 分鐘改為 10 分鐘，減少不必要的 DB 查詢

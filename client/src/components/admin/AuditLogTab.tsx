@@ -160,8 +160,17 @@ export default function AuditLogTab() {
                   verifyChain.data.ok ? "text-emerald-900" : "text-red-900"
                 }`}
               >
+                {/* R5-4/R6-4:綠燈語意限定 —— 只要「存在錨」(epochStartId 非
+                    null,不看 legacyRows)就只能宣稱「最後錨點起完整」,絕不可
+                    宣稱整條歷史未被竄改;legacyRows=0 也一樣(錨的存在本身就
+                    代表驗證範圍被截斷過)。 */}
                 {verifyChain.data.ok
-                  ? t("admin.auditLog.chainOk")
+                  ? verifyChain.data.epochStartId != null
+                    ? t("admin.auditLog.chainOkFromAnchor", {
+                        id: String(verifyChain.data.epochStartId),
+                        count: verifyChain.data.legacyRows ?? 0,
+                      })
+                    : t("admin.auditLog.chainOk")
                   : t("admin.auditLog.chainAnomalies", { count: verifyChain.data.anomalies.length })}
               </p>
               <p className="text-xs text-gray-600 mt-0.5">
@@ -172,7 +181,20 @@ export default function AuditLogTab() {
                 {verifyChain.data.ungatedRows > 0 && (
                   <span> · {t("admin.auditLog.ungatedRows", { count: verifyChain.data.ungatedRows })}</span>
                 )}
+                {(verifyChain.data.legacyRows ?? 0) > 0 && (
+                  <span> · {t("admin.auditLog.legacyRows", { count: verifyChain.data.legacyRows })}</span>
+                )}
+                {verifyChain.data.epochStartId != null && (
+                  <span> · {t("admin.auditLog.epochAnchor", { id: String(verifyChain.data.epochStartId) })}</span>
+                )}
               </p>
+              {/* 自查 P1c:重錨事件(錨列 >1)是高度可疑訊號,醒目提示,
+                  應與外部 evidence 檔記載的首錨 id 比對 */}
+              {(verifyChain.data.epochCount ?? 0) > 1 && (
+                <p className="mt-1 rounded-md bg-red-50 border border-red-200 px-2 py-1 text-xs font-medium text-red-700">
+                  {t("admin.auditLog.multiEpochWarning", { count: verifyChain.data.epochCount })}
+                </p>
+              )}
               {verifyChain.data.anomalies.length > 0 && (
                 <div className="mt-3 space-y-1.5 max-h-48 overflow-y-auto">
                   {verifyChain.data.anomalies.slice(0, 20).map((a, i) => (
