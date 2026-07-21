@@ -1310,6 +1310,7 @@ describe("R13 adminAuditLog 直接寫入者 guard(TypeChecker+lexical 求值+SQL
       ts, findDrizzleWriters, buildGuardProgram, selectRoots, isRawSqlWriterSource,
       sqlHitsAdminAuditLog, walkCanonicalFiles, isCanonicalPath,
       getWalkCallCount: () => walkCallCount,
+      getRawMemoSize: () => rawResultMemo.size,
     };
   }
 
@@ -1568,8 +1569,40 @@ describe("R13 adminAuditLog 直接寫入者 guard(TypeChecker+lexical 求值+SQL
     expect(union).not.toEqual(["scripts/grant-admin.mjs", "server/_core/auditLog.ts"].sort());
   }, 480000);
 
-  it("R18-1 differential proof:全庫 raw 掃描「有/無優化」結果完全等價", async () => {
-    const { isRawSqlWriterSource, walkCanonicalFiles } = await getScanner();
+  it("R19-1 三反例各自過完整 union:拆字串串接/模板片段/字串值內 unicode escape", async () => {
+    const { isRawSqlWriterSource } = await getScanner();
+    const root = process.cwd();
+    const CASES: Array<[string, string]> = [
+      [root + "/scripts/__r19_concat__.mjs", 'const a = "adminAudit";\nconst b = "Log";\nconst conn = { execute: async () => {} };\nawait conn.execute("INSERT INTO " + a + b + " (x) VALUES (1)");\n'],
+      [root + "/scripts/__r19_tpl__.mjs", 'const t = `adminAudit${"Log"}`;\nconst conn = { execute: async () => {} };\nawait conn.execute(`INSERT INTO ${t} (x) VALUES (1)`);\n'],
+      [root + "/scripts/__r19_uni__.mjs", 'const conn = { execute: async () => {} };\nawait conn.execute("INSERT INTO adminAudit\\u004Cog (x) VALUES (1)");\n'],
+    ];
+    for (const [p, src] of CASES) {
+      expect(isRawSqlWriterSource(src, "/scan/" + p.split("/").pop()), p).toBe(true); // helper
+      const union = await computeWriterUnion({ [p]: src }); // 完整 union
+      expect(union, p).toContain(p.slice(root.length + 1));
+      expect(union, p).not.toEqual(["scripts/grant-admin.mjs", "server/_core/auditLog.ts"].sort());
+    }
+  }, 900000);
+
+  it("R19-2 escaped callee(conn.\\u0065xecute):helper+完整 union 承重;刪 \\u 例外分支必紅", async () => {
+    const { isRawSqlWriterSource } = await getScanner();
+    const root = process.cwd();
+    // 原始碼刻意不含明文 execute/query:唯一能過預過濾的路徑是 \u 例外分支,
+    // 刪掉該分支 → 預過濾剪掉 → helper false → 本測試紅(mutation-killer)。
+    const src = 'const conn = { ["\\u0065xecute"]: async () => {} };\nawait conn.\\u0065xecute("INSERT INTO adminAuditLog (x) VALUES (1)");\n';
+    expect(/execute|query/i.test(src)).toBe(false); // 前提自檢:無明文 callee
+    expect(isRawSqlWriterSource(src, "/scan/__r19_esc__.mjs")).toBe(true);
+    const p = root + "/scripts/__r19_esc__.mjs";
+    const union = await computeWriterUnion({ [p]: src });
+    expect(union).toContain("scripts/__r19_esc__.mjs");
+  }, 480000);
+
+  it("R18-1 differential proof:全庫 raw 掃描「有/無優化」結果完全等價(R19-3:fresh scanner,雙掃可機械驗證)", async () => {
+    // fresh scanner:rawResultMemo 必為空 —— optimized 半邊不可能吃到其他測試
+    // 預熱的快取;unoptimized 半邊(optimized=false)完全繞過 memo 讀寫。
+    const { isRawSqlWriterSource, walkCanonicalFiles, getRawMemoSize } = await makeCheckerScanner();
+    expect(getRawMemoSize()).toBe(0);
     const { readFileSync } = await import("node:fs");
     const root = process.cwd();
     const canonical = walkCanonicalFiles(root);
