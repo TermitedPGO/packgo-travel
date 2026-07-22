@@ -11,6 +11,7 @@
     "check:no-mock": "node scripts/check-no-mock.mjs",
     "format": "prettier --write .",
     "test": "vitest run",
+    "eval:inquiry": "tsx server/evals/runInquiryEval.ts",
     "ship": "node scripts/safe-deploy.mjs",
     "ship:test": "node --test scripts/safe-deploy.test.mjs",
     "db:push": "drizzle-kit generate && drizzle-kit migrate",
