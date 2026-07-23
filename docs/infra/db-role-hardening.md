@@ -164,4 +164,4 @@ flyctl secrets unset MIGRATION_DATABASE_URL -a packgo-travel
 1. 在 TiDB Cloud（SQL 或 console SQL Users 頁,以 root）跑 §2.1 建 app_runtime + migrator,貼回兩份 `SHOW GRANTS` 供核對。
 2. 跑 §2.2 建 canary schema + 授權 + 由 migrator 建 `canary_probe_target`。
 3. 依 §2.3 兩步設 Fly secrets 並部署,回報 release 日誌的 `credential source` 行與 `/health` 的 `checks.schema`。
-4. 設 `CANARY_APP_RUNTIME_DATABASE_URL` 跑 `node scripts/canary-ddl-rejection.mjs`,回報四類 DDL 是否全被拒 + 各自 errno/sqlState。
+4. 設 `CANARY_APP_RUNTIME_DATABASE_URL` 跑 `node scripts/canary-runtime-probe.mjs`(9a 正向,14 項)與 `node scripts/canary-ddl-rejection.mjs`(9b 反向,四類 DDL),回報兩支的成績單。兩支的用法、預期輸出、安全前提與檢查項次編號,以 [`docs/infra/canary-verification.md`](./canary-verification.md) 為準。
