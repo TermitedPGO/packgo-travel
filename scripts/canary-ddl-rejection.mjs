@@ -74,7 +74,13 @@ async function main() {
     user: decodeURIComponent(u.username),
     password: decodeURIComponent(u.password),
     database: u.pathname.replace(/^\//, ""),
-    ssl: { rejectUnauthorized: false },
+    // TLS 必須驗證伺服器憑證:這條連線會送出 app_runtime 的密碼,關驗證等於允許
+    // 中間人。TiDB Cloud 用公開 CA,Node 內建 CA bundle 即可驗過(同 repo 既有
+    // scripts/grant-admin.mjs、scripts/translateAllTours.mjs 就是這樣連的)。
+    // verifyIdentity 必須另外寫 true:mysql2 3.16.1 在 lib/base/connection.js 會把
+    // checkServerIdentity 換成永遠回 undefined 的空函式,除非傳 verifyIdentity,
+    // 也就是只寫 rejectUnauthorized 只驗簽發鏈、不核對主機名。兩個都要。
+    ssl: { rejectUnauthorized: true, verifyIdentity: true, minVersion: "TLSv1.2" },
     multipleStatements: false,
   });
 
