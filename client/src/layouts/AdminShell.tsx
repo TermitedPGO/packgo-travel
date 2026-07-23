@@ -1,4 +1,4 @@
-import { ReactNode } from "react";
+import { ReactNode, useEffect } from "react";
 import { useLocation, Link } from "wouter";
 import { useLocale } from "@/contexts/LocaleContext";
 import { trpc } from "@/lib/trpc";
@@ -10,6 +10,7 @@ import {
   Megaphone,
   Settings,
 } from "lucide-react";
+import { reportBootOnce, shortBuildSha } from "./adminShellBoot";
 
 const NAV = [
   { path: "/ops", icon: Home, labelKey: "admin.navHome" as const },
@@ -29,6 +30,19 @@ export default function AdminShell({ children }: { children: ReactNode }) {
     refetchInterval: 60_000,
   });
   const customerUnread = unreadQ.data?.count ?? 0;
+
+  // 1A0a boot telemetry(plan v4.3 §3.2.9):換版證明上報,orchestration 全在
+  // adminShellBoot.ts(可測 Seam),此處只接線。失敗不寫 guard,下次 mount 重試。
+  const bootReport = trpc.clientBoot.report.useMutation();
+  const reportFn = bootReport.mutateAsync;
+  useEffect(() => {
+    void reportBootOnce({
+      storage: sessionStorage,
+      buildSha: __BUILD_SHA__,
+      matchMediaFn: (q) => window.matchMedia(q),
+      report: (payload) => reportFn(payload),
+    });
+  }, [reportFn]);
 
   const isActive = (path: string) => {
     if (path === "/ops") return location === "/ops";
@@ -68,6 +82,11 @@ export default function AdminShell({ children }: { children: ReactNode }) {
         })}
 
         <div className="flex-1" />
+
+        {/* 1A0a:build 短 sha(換版證明第二證,Jeff 肉眼核) */}
+        <span className="mb-1 select-all text-[8px] tracking-tight text-gray-600" title="build">
+          {shortBuildSha(__BUILD_SHA__)}
+        </span>
 
         <Link href="/ops/settings">
           <button

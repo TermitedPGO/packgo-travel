@@ -27,6 +27,19 @@ export interface MaybeAppendUpgradeArgs {
   bookingCount?: number;
 }
 
+/**
+ * The literal CTA copy appended to a draft. Exported PURE so the final send
+ * chokepoint regression can prove the real copy — which deliberately still
+ * contains Markdown `**` and em dashes — is neutralized by
+ * stripMarkdownForEmail before any autonomous send (Codex 16:02 P1-3).
+ */
+export function buildUpgradeCta(language: string | undefined, baseUrl: string): string {
+  const isEN = language === "en";
+  return isEN
+    ? `\n\n— — — — — — — — — — — — — — — — —\nP.S. Since you've travelled with us before, you may enjoy **PACK&GO Plus**. AI remembers your preferences (food, accommodation, pace) so next time we plan your trip, you get 3 tailored options in seconds — not generic catalog. 10-day free trial, cancel anytime online.\nLearn more: ${baseUrl}/membership`
+    : `\n\n— — — — — — — — — — — — — — — — —\nP.S. 您之前跟我們旅行過,可能會喜歡 **PACK&GO Plus**。讓 AI 記住您的偏好(飲食、住宿、節奏),下次規劃旅程 10 秒給您 3 個量身選項,不再是制式 catalog。10 天免費試用,可隨時線上取消。\n了解更多:${baseUrl}/membership`;
+}
+
 export async function maybeAppendUpgradeCta(args: MaybeAppendUpgradeArgs): Promise<{
   draftReply: string;
   appended: boolean;
@@ -98,11 +111,8 @@ export async function maybeAppendUpgradeCta(args: MaybeAppendUpgradeArgs): Promi
     }
 
     // All gates passed → append CTA + mark pitched
-    const isEN = args.language === "en";
     const baseUrl = process.env.BASE_URL || "https://packgoplay.com";
-    const cta = isEN
-      ? `\n\n— — — — — — — — — — — — — — — — —\nP.S. Since you've travelled with us before, you may enjoy **PACK&GO Plus**. AI remembers your preferences (food, accommodation, pace) so next time we plan your trip, you get 3 tailored options in seconds — not generic catalog. 10-day free trial, cancel anytime online.\nLearn more: ${baseUrl}/membership`
-      : `\n\n— — — — — — — — — — — — — — — — —\nP.S. 您之前跟我們旅行過,可能會喜歡 **PACK&GO Plus**。讓 AI 記住您的偏好(飲食、住宿、節奏),下次規劃旅程 10 秒給您 3 個量身選項,不再是制式 catalog。10 天免費試用,可隨時線上取消。\n了解更多:${baseUrl}/membership`;
+    const cta = buildUpgradeCta(args.language, baseUrl);
 
     const augmentedDraft = args.draftReply + cta;
 

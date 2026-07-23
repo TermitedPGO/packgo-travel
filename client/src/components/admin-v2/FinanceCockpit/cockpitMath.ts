@@ -31,8 +31,8 @@ export interface TrustReconRowLike {
   departedPendingCount?: number | null;
 }
 
-/** decimal 字串 / number / null → number|null(NaN 視為 null)。 */
-function toNum(v: string | number | null | undefined): number | null {
+/** decimal 字串 / number / null → number|null(NaN 視為 null;禁 `parseFloat||0` 流水線)。 */
+export function toNum(v: string | number | null | undefined): number | null {
   if (v === null || v === undefined) return null;
   const n = typeof v === "number" ? v : parseFloat(v);
   return Number.isFinite(n) ? n : null;
@@ -174,16 +174,18 @@ export interface DepartedPendingItem {
 export function foldDepartedPending(
   rows: DeferredRowLike[] | undefined | null,
   todayStr: string,
-): { items: DepartedPendingItem[]; total: number; count: number } {
+): { items: DepartedPendingItem[]; total: number; count: number; invalidCount: number } {
   const items: DepartedPendingItem[] = [];
   let total = 0;
-  if (!rows) return { items, total, count: 0 };
+  let invalidCount = 0;
+  if (!rows) return { items, total, count: 0, invalidCount };
   for (const r of rows) {
     if (r.recognizedAt || r.reversedAt) continue;
     if (!r.bookingId) continue;
     const rec = dateOnlyClient(r.expectedRecognitionDate);
     if (rec === null || rec > todayStr) continue;
-    const a = parseFloat(String(r.amount)) || 0;
+    const a = toNum(r.amount);
+    if (a === null) { invalidCount++; continue; } // 爛值不折 0,顯性排除(1A0a U8)
     total += a;
     items.push({
       id: r.id,
@@ -195,7 +197,7 @@ export function foldDepartedPending(
       tourTitle: r.bookingTourTitle ?? null,
     });
   }
-  return { items, total, count: items.length };
+  return { items, total, count: items.length, invalidCount };
 }
 
 /** 客人訂金卡「已對應未出發」逐團列(塊C)。 */
@@ -239,7 +241,8 @@ export function foldMatchedNotDeparted(
       if (!r.bookingId) continue;
       const rec = dateOnlyClient(r.expectedRecognitionDate);
       if (rec !== null && rec <= todayStr) continue; // 已出發 → 待認列卡的事
-      const a = parseFloat(String(r.amount)) || 0;
+      const a = toNum(r.amount);
+      if (a === null) continue; // 爛值不折 0(1A0a U8;逐團列表面,總額不摻假值)
       total += a;
       const daysUntil = rec !== null ? agingDays(todayStr, rec) : null;
       all.push({
@@ -313,21 +316,89 @@ export function profitMargin(income: number, netProfit: number): number {
   return Math.round((netProfit / income) * 1000) / 10;
 }
 
-export type TileState = "loading" | "error" | "stale" | "ready";
+import type { QueryDisplayState, WorkSourceState } from "./types";
+
+/** @deprecated 過渡 alias(canonical 定義在 types.ts QueryDisplayState;1A1 前清光引用後刪)。 */
+export type TileState = QueryDisplayState;
 
 /**
- * 單格真相狀態:讀取失敗 / 載入中 / 舊值降級 / 就緒。fail-open ——
- * 首載就失敗(沒任何資料)才顯示「讀取失敗」;refetch 失敗但 react-query 還
- * 保留上次好值時降級成 stale(顯示上次值 + 淡標記),不整格翻臉(F3 回爐 #7)。
+ * 單格真相狀態:讀取失敗 / 載入中 / 舊值降級 / 就緒。
+ * 首載就失敗(沒任何資料)= "transport-error"(連線失敗且無快取值,1A0a 更名,
+ * 原 "error");refetch 失敗但 react-query 還保留上次好值時降級成 stale
+ * (顯示上次值 + 淡標記),不整格翻臉(F3 回爐 #7)。
  */
 export function resolveTileState(q: {
   isLoading: boolean;
   isError: boolean;
   hasData: boolean;
-}): TileState {
-  if (q.isError) return q.hasData ? "stale" : "error";
+}): QueryDisplayState {
+  if (q.isError) return q.hasData ? "stale" : "transport-error";
   if (q.isLoading || !q.hasData) return "loading";
   return "ready";
+}
+
+/* ── 工作區 allClear 兩源狀態(plan v4.3 §7.3)────────────────────────── */
+
+/**
+ * freshness 門檻 = 2 × 現行輪詢間隔(useCockpitData PENDING_POLL_MS=300s /
+ * KPI_POLL_MS=120s)。契約:age <= 門檻 → 仍 fresh;超齡即 stale。
+ */
+export const FRESH_MAX_AGE_MS = {
+  pendingSummary: 600_000,
+  trustReconciliation: 240_000,
+} as const;
+
+/** deriveWorkState 的輸入(自 react-query 摺出,純資料無 hook)。 */
+export interface WorkQueryLike {
+  isLoading: boolean;
+  isError: boolean;
+  hasData: boolean;
+  /** 最近一次成功抓取(ms epoch);0 = 從未成功。 */
+  dataUpdatedAt: number;
+  /** 由 data 導出的計數;無 data = null(絕不折 0)。 */
+  count: number | null;
+}
+
+function deriveWorkSourceState(
+  q: WorkQueryLike,
+  maxAgeMs: number,
+  nowMs: number,
+): WorkSourceState {
+  if (!q.hasData) {
+    if (q.isError) return { state: "transport-error", count: null };
+    return { state: "loading", count: null };
+  }
+  const age = nowMs - q.dataUpdatedAt;
+  const stale = q.isError || age > maxAgeMs; // age <= 門檻 → fresh
+  return { state: stale ? "stale" : "ready", count: q.count };
+}
+
+/** 兩源各自折 WorkSourceState;state==="ready" 蘊含 fresh。 */
+export function deriveWorkState(
+  pending: WorkQueryLike,
+  recog: WorkQueryLike,
+  nowMs: number,
+): { pending: WorkSourceState; recog: WorkSourceState } {
+  return {
+    pending: deriveWorkSourceState(pending, FRESH_MAX_AGE_MS.pendingSummary, nowMs),
+    recog: deriveWorkSourceState(recog, FRESH_MAX_AGE_MS.trustReconciliation, nowMs),
+  };
+}
+
+/**
+ * allClear 公式(plan v4.3 §7.3):兩源皆 ready(蘊含 fresh)且計數皆真零。
+ * 任一 loading/transport-error/stale/count>0/count===null → false。
+ */
+export function isAllClear(w: {
+  pending: WorkSourceState;
+  recog: WorkSourceState;
+}): boolean {
+  return (
+    w.pending.state === "ready" &&
+    w.recog.state === "ready" &&
+    w.pending.count === 0 &&
+    w.recog.count === 0
+  );
 }
 
 /** $12,300(整數、千分位)。真相列所有金額走這支,tabular-nums 對齊。 */

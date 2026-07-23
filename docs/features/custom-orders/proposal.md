@@ -1,3 +1,5 @@
+> 【2026-07-12 指揮更正】本檔內「出發後才 recognize/轉 Operating」的信託口徑已撤回(法律定性歸律師/CPA)。現行規則:客戶款項具信託責任,不得僅以出發日推導可提領或可認列;見 CLAUDE.md 紅線 3 與 docs/agent/60-evidence-and-ops.md §7。下方原文僅存設計脈絡,勿據以入帳。
+
 # 訂製單 (Custom Orders) — Stage 1 Proposal
 
 > 狀態:Stage 1 草案,待 Jeff 補齊「待你拍板的決策」後進 Stage 2 設計。

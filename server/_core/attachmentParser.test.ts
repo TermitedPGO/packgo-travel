@@ -9,14 +9,14 @@
  *   - Size limits (too_large, truncation marker)
  *   - Empty file handling
  *   - parseError path (corrupt zip)
- *
- * PDF parsing isn't unit-tested here — pdf-parse needs a real binary PDF
- * and we exercise that path via integration tests on Jenny's actual email
- * once deployed. The wrapper around it (size check + truncation + error
- * catch) IS tested via the parse_error case.
+ *   - PDF against the REAL installed pdf-parse@2.4.5 + generated fixtures
+ *     (pdf-attachment-reliability 2026-07-15): the old "PDF isn't unit-tested
+ *     here" carve-out let a v1→v2 API break ship fake-green — every real PDF
+ *     died with "pdf-parse export is not callable" before reading a byte.
+ *     Only the Claude-native fallback (imageOcr) is mocked; pdf-parse never is.
  */
 
-import { describe, it, expect, vi } from "vitest";
+import { describe, it, expect, vi, beforeEach } from "vitest";
 import JSZip from "jszip";
 
 vi.mock("./imageOcr", () => ({
@@ -27,16 +27,23 @@ vi.mock("./imageOcr", () => ({
 import {
   parseAttachment,
   detectAttachmentKind,
-  resolvePdfParse,
   buildFileContextText,
   MAX_RAW_BYTES,
   MAX_TEXT_CHARS,
   TRUNCATION_MARKER,
   type AttachmentParseResult,
 } from "./attachmentParser";
-import { extractImageText } from "./imageOcr";
+import { extractImageText, extractPdfText } from "./imageOcr";
+import {
+  buildTextPdf,
+  buildItineraryPdf,
+  buildNoTextPdf,
+  buildCorruptPdf,
+  buildMultiPagePdf,
+} from "./pdfTestFixture";
 
 const ocrMock = vi.mocked(extractImageText);
+const pdfFallbackMock = vi.mocked(extractPdfText);
 
 // ──────────────────────────────────────────────────────────────────────
 // detectAttachmentKind
@@ -360,14 +367,17 @@ describe("parseAttachment — text formats", () => {
     expect(result.text).not.toContain("image attachment");
   });
 
-  it("falls back to a placeholder when the image genuinely can't be read", async () => {
+  it("image OCR failure is parse_error, NEVER ok (Codex 14:07 P1-2)", async () => {
+    // Old behavior returned a「系統暫時讀不出內容」placeholder with
+    // parseStatus="ok" — the reply gate then treated a genuinely unread
+    // image as readable and never escalated.
     ocrMock.mockResolvedValueOnce({ ok: false, text: "" });
     const png = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
     const result = await parseAttachment("photo.png", "image/png", png);
     expect(result.kind).toBe("image");
-    expect(result.parseStatus).toBe("ok");
-    expect(result.text).toContain("photo.png");
-    expect(result.text).toContain("讀不出");
+    expect(result.parseStatus).toBe("parse_error");
+    expect(result.text).toBe("");
+    expect(result.parseError).toBeTruthy();
   });
 
   it("large image is NOT rejected as too_large (we downscale + read it)", async () => {
@@ -431,22 +441,135 @@ describe("parseAttachment — limits", () => {
   });
 });
 
-describe("resolvePdfParse — bundler interop", () => {
-  const fn = async () => ({ text: "ok" });
+// ──────────────────────────────────────────────────────────────────────
+// PDF — REAL pdf-parse@2.4.5 against generated fixtures (no customer data).
+// Only the Claude-native fallback (imageOcr.extractPdfText) is mocked here;
+// mocking pdf-parse itself (the 2026-07-15 incident's blind spot) is banned.
+// ──────────────────────────────────────────────────────────────────────
 
-  it("returns the module itself when it is the function (CJS)", () => {
-    expect(resolvePdfParse(fn)).toBe(fn);
+describe("parseAttachment — PDF (real pdf-parse, real fixtures)", () => {
+  beforeEach(() => {
+    pdfFallbackMock.mockReset();
   });
-  it("unwraps a single default (ESM)", () => {
-    expect(resolvePdfParse({ default: fn })).toBe(fn);
+
+  it("valid text PDF → parseStatus=ok, non-empty text, fallback NOT consulted", async () => {
+    const result = await parseAttachment(
+      "fixture-itinerary.pdf",
+      "application/pdf",
+      buildItineraryPdf()
+    );
+    expect(result.kind).toBe("pdf");
+    expect(result.parseStatus).toBe("ok");
+    expect(result.text).toContain("PACKGO PARSER FIXTURE");
+    expect(result.text.trim().length).toBeGreaterThan(0);
+    expect(pdfFallbackMock).not.toHaveBeenCalled();
   });
-  it("unwraps a double-wrapped default (the prod-bundle shape that broke)", () => {
-    expect(resolvePdfParse({ default: { default: fn } })).toBe(fn);
+
+  it("primary parser THROW (corrupt PDF) → Claude PDF fallback runs, its text used", async () => {
+    pdfFallbackMock.mockResolvedValueOnce({
+      ok: true,
+      text: "fallback read: synthetic itinerary recovered by Claude native PDF reader",
+    });
+    const result = await parseAttachment(
+      "corrupt.pdf",
+      "application/pdf",
+      buildCorruptPdf()
+    );
+    expect(pdfFallbackMock).toHaveBeenCalledTimes(1);
+    expect(result.parseStatus).toBe("ok");
+    expect(result.text).toContain("fallback read");
   });
-  it("returns null when nothing is callable (so the caller throws clearly)", () => {
-    expect(resolvePdfParse({ default: { notAFn: 1 } })).toBe(null);
-    expect(resolvePdfParse(null)).toBe(null);
-    expect(resolvePdfParse({})).toBe(null);
+
+  it("primary returns NO text (scanned-style PDF) → fallback runs", async () => {
+    pdfFallbackMock.mockResolvedValueOnce({
+      ok: true,
+      text: "scanned content recovered by fallback, plenty long for the itinerary",
+    });
+    const result = await parseAttachment(
+      "scan.pdf",
+      "application/pdf",
+      buildNoTextPdf()
+    );
+    expect(pdfFallbackMock).toHaveBeenCalledTimes(1);
+    expect(result.parseStatus).toBe("ok");
+    expect(result.text).toContain("recovered by fallback");
+  });
+
+  it("primary returns THIN text → fallback consulted; fallback text wins when ok", async () => {
+    pdfFallbackMock.mockResolvedValueOnce({
+      ok: true,
+      text: "full document text recovered by the native reader, much richer than thin primary",
+    });
+    const result = await parseAttachment(
+      "thin.pdf",
+      "application/pdf",
+      buildTextPdf(["Ref 12345"]) // < 40 normalized chars
+    );
+    expect(pdfFallbackMock).toHaveBeenCalledTimes(1);
+    expect(result.parseStatus).toBe("ok");
+    expect(result.text).toContain("recovered by the native reader");
+  });
+
+  it("ONLY both-paths-failed returns parse_error, with internal reason preserved", async () => {
+    pdfFallbackMock.mockResolvedValueOnce({ ok: false, text: "" });
+    const result = await parseAttachment(
+      "corrupt.pdf",
+      "application/pdf",
+      buildCorruptPdf()
+    );
+    expect(pdfFallbackMock).toHaveBeenCalledTimes(1);
+    expect(result.parseStatus).toBe("parse_error");
+    expect(result.text).toBe("");
+    expect(result.parseError).toBeTruthy();
+  });
+
+  it("primary ok-but-thin + fallback fails → partial, NEVER ok (Codex 14:07 P1-1)", async () => {
+    // Old behavior kept the fragment with parseStatus="ok" — a watermark-only
+    // scan read as a full read, and the reply gate never escalated. partial
+    // keeps the fragment for Jeff but is non-readable at the gate.
+    pdfFallbackMock.mockResolvedValueOnce({ ok: false, text: "" });
+    const result = await parseAttachment(
+      "thin.pdf",
+      "application/pdf",
+      buildTextPdf(["Ref 12345"])
+    );
+    expect(result.parseStatus).toBe("partial");
+    expect(result.text).toContain("Ref 12345");
+    expect(result.parseError).toBeTruthy();
+  });
+
+  it("no-text PDF + fallback fails → parse_error (nothing readable, both paths tried)", async () => {
+    pdfFallbackMock.mockResolvedValueOnce({ ok: false, text: "" });
+    const result = await parseAttachment(
+      "scan.pdf",
+      "application/pdf",
+      buildNoTextPdf()
+    );
+    expect(result.parseStatus).toBe("parse_error");
+    expect(result.text).toBe("");
+    expect(result.parseError).toBeTruthy();
+  });
+
+  it("51-page PDF reads only the 50-page cap → ok_truncated with page marker (Codex 14:07 §四.1)", async () => {
+    const result = await parseAttachment(
+      "long.pdf",
+      "application/pdf",
+      buildMultiPagePdf(51, "Fixture page content long enough to stay above the thin-text floor.")
+    );
+    expect(pdfFallbackMock).not.toHaveBeenCalled();
+    expect(result.parseStatus).toBe("ok_truncated");
+    expect(result.text).toContain("共 51 頁");
+    expect(result.text).toContain("僅解析前 50 頁");
+  });
+
+  it("50-page PDF (at the cap, not over) stays plain ok — no false truncation", async () => {
+    const result = await parseAttachment(
+      "exactly50.pdf",
+      "application/pdf",
+      buildMultiPagePdf(50, "Fixture page content long enough to stay above the thin-text floor.")
+    );
+    expect(result.parseStatus).toBe("ok");
+    expect(result.text).not.toContain("僅解析前");
   });
 });
 
@@ -486,7 +609,25 @@ describe("buildFileContextText — assembles the chat fileContext from parsed fi
     expect(out).toContain("--- huge.pdf ---\n(檔案太大,讀不了)");
     expect(out).toContain("--- blank.txt ---\n(空檔)");
     expect(out).toContain("--- weird.bin ---\n(不支援的檔案類型)");
-    expect(out).toContain("--- broken.docx ---\n(這個檔讀不出內容)");
+    // parse_error 到這裡代表系統該試的都試過了(PDF 含 Claude 備援)——給 Jeff
+    // 清楚的人工作業提示,不是可重試狀態。
+    expect(out).toContain("--- broken.docx ---\n(這個檔系統讀不出來,請開原始檔確認)");
+  });
+
+  it("partial keeps the fragment but flags it as incomplete (Codex 14:07 P1-1)", () => {
+    const out = buildFileContextText([
+      r({ filename: "thin.pdf", kind: "pdf", parseStatus: "partial", text: "Ref 12345" }),
+    ]);
+    expect(out).toContain("--- thin.pdf ---");
+    expect(out).toContain("零碎片段");
+    expect(out).toContain("Ref 12345");
+  });
+
+  it("not_processed (cap overflow / hydration failure) gets a manual-work note (Codex 14:07 P1-3)", () => {
+    const out = buildFileContextText([
+      r({ filename: "sixth.pdf", kind: "unknown", parseStatus: "not_processed", text: "" }),
+    ]);
+    expect(out).toContain("--- sixth.pdf ---\n(這個檔系統沒有處理到,請開原始檔確認)");
   });
 
   it("returns empty string for no files", () => {

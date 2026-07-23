@@ -7,6 +7,8 @@
  *   - 待認領     bankTransactionLinks.pendingSummary → { count, totalAmount }(F3 新增唯讀)
  *   - Trust未認列 plaid.trustReconciliation         → 加總 outstanding / unmatched / balance
  *
+ * 1A0a 誠實化:逐格 state + 逐源 asOf(廢頁級 max asOf 與「四錯才 error」);
+ * 數字欄 state 非 ready/stale 時一律 null,禁止 `?? 0` 折疊(plan v4.3 §3.2/U1-U3)。
  * 塊B/C 不要各自重接這些 —— 吃回傳的 CockpitData。要逐筆明細再各自加自己的 query。
  */
 import { trpc } from "@/lib/trpc";
@@ -15,11 +17,13 @@ import {
   aggregateTrust,
   profitMargin,
   resolveTileState,
+  deriveWorkState,
 } from "./cockpitMath";
 import type { CockpitData } from "./types";
 
 const OPERATING_MASK = "2174";
 // 真相列一般 120s 跟其它 KPI 同步;pendingSummary 走全量 dry-run 掃描較貴,放慢到 5 分鐘。
+// 注意:cockpitMath.FRESH_MAX_AGE_MS = 2×這兩個常數;改輪詢間隔必須同步改門檻。
 const KPI_POLL_MS = 120_000;
 const PENDING_POLL_MS = 300_000;
 
@@ -38,51 +42,69 @@ export function useCockpitData(): CockpitData {
     staleTime: KPI_POLL_MS,
   });
 
-  const cash = selectOperatingBalance(accounts.data, OPERATING_MASK);
-  const trustAgg = aggregateTrust(trust.data);
-  const income = kpi.data?.thisMonth.income ?? 0;
-  const netProfit = kpi.data?.thisMonth.netProfit ?? 0;
-
   const st = (q: { isLoading: boolean; isError: boolean; data: unknown }) =>
     resolveTileState({ isLoading: q.isLoading, isError: q.isError, hasData: q.data !== undefined });
+  const asOf = (q: { dataUpdatedAt: number }) =>
+    q.dataUpdatedAt > 0 ? q.dataUpdatedAt : null;
 
-  const asOfCandidates = [
-    kpi.dataUpdatedAt,
-    accounts.dataUpdatedAt,
-    trust.dataUpdatedAt,
-    pending.dataUpdatedAt,
-  ].filter((n): n is number => typeof n === "number" && n > 0);
+  const cash = selectOperatingBalance(accounts.data, OPERATING_MASK);
+  const trustAgg = trust.data !== undefined ? aggregateTrust(trust.data) : null;
+  // 數字欄:無 data 一律 null(顯示交給逐格 state),絕不 `?? 0`。
+  const income = kpi.data !== undefined ? kpi.data.thisMonth.income : null;
+  const netProfit = kpi.data !== undefined ? kpi.data.thisMonth.netProfit : null;
+
+  const work = deriveWorkState(
+    {
+      isLoading: pending.isLoading,
+      isError: pending.isError,
+      hasData: pending.data !== undefined,
+      dataUpdatedAt: pending.dataUpdatedAt,
+      count: pending.data !== undefined ? pending.data.count : null,
+    },
+    {
+      isLoading: trust.isLoading,
+      isError: trust.isError,
+      hasData: trust.data !== undefined,
+      dataUpdatedAt: trust.dataUpdatedAt,
+      count: trustAgg !== null ? trustAgg.departedPendingCount : null,
+    },
+    Date.now(),
+  );
 
   return {
     truth: {
-      cash: { state: st(accounts), balance: cash, mask: OPERATING_MASK },
-      pl: { state: st(kpi), netProfit, income, margin: profitMargin(income, netProfit) },
+      cash: { state: st(accounts), balance: cash, mask: OPERATING_MASK, asOf: asOf(accounts) },
+      pl: {
+        state: st(kpi),
+        netProfit,
+        income,
+        margin: income !== null && netProfit !== null ? profitMargin(income, netProfit) : null,
+        asOf: asOf(kpi),
+      },
       pending: {
         state: st(pending),
-        count: pending.data?.count ?? 0,
-        total: pending.data?.totalAmount ?? 0,
+        count: pending.data !== undefined ? pending.data.count : null,
+        total: pending.data !== undefined ? pending.data.totalAmount : null,
+        asOf: asOf(pending),
       },
       trust: {
         state: st(trust),
         // 主數字 = 已對應未出發(F3 回爐 P1:B-final 定稿口徑,非全部 outstanding)
-        matchedNotDeparted: trustAgg.matchedNotDeparted,
-        outstanding: trustAgg.outstanding,
-        departedPending: trustAgg.departedPending,
-        departedPendingCount: trustAgg.departedPendingCount,
-        unmatchedTotal: trustAgg.unmatchedTotal,
-        unmatchedCount: trustAgg.unmatchedCount,
-        balance: trustAgg.balance,
-        enabled: trustAgg.enabled,
-        accountMask: trustAgg.accountMask,
+        matchedNotDeparted: trustAgg?.matchedNotDeparted ?? null,
+        outstanding: trustAgg?.outstanding ?? null,
+        departedPending: trustAgg?.departedPending ?? null,
+        departedPendingCount: trustAgg?.departedPendingCount ?? null,
+        unmatchedTotal: trustAgg?.unmatchedTotal ?? null,
+        unmatchedCount: trustAgg?.unmatchedCount ?? null,
+        balance: trustAgg?.balance ?? null,
+        enabled: trustAgg?.enabled ?? false,
+        accountMask: trustAgg?.accountMask ?? null,
+        asOf: asOf(trust),
       },
     },
-    counts: {
-      pendingCount: pending.data?.count ?? 0,
-      departedPendingCount: trustAgg.departedPendingCount,
-    },
-    asOf: asOfCandidates.length ? Math.max(...asOfCandidates) : null,
-    // 頁級 loading:任一還在首載;頁級 error:全部都錯(單格錯走各格 fail-open)。
+    work,
     isLoading: kpi.isLoading || accounts.isLoading || trust.isLoading || pending.isLoading,
-    isError: kpi.isError && accounts.isError && trust.isError && pending.isError,
+    // 任一源失敗即亮頁級警示 badge(主態仍由逐格 state 呈現;廢「四錯才 error」)。
+    anySourceError: kpi.isError || accounts.isError || trust.isError || pending.isError,
   };
 }

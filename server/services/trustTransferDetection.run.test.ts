@@ -25,6 +25,14 @@ vi.mock("../redis", () => ({
   },
 }));
 
+// B1.1(Codex 6.5 P0.1):實機閘 isTrustTransferWriteApproved 硬回 false,會強制
+// 整條寫入路徑進 dry-run。這批「既有寫入邏輯」的測試把閘 mock 為 true 以繼續守護
+// 那段寫入碼(留待未來矩陣核准批復用);下方另有 gate=false 的 fail-closed 測試。
+const writeApproved = vi.fn(() => true);
+vi.mock("./trustTransferWriteGate", () => ({
+  isTrustTransferWriteApproved: () => writeApproved(),
+}));
+
 import {
   runTrustTransferDetection,
   runManualTransferBackfill,
@@ -97,6 +105,8 @@ const transferTxns = [
 beforeEach(() => {
   vi.clearAllMocks();
   redisGet.mockResolvedValue(null);
+  // clearAllMocks 不重置 mockReturnValue,寫入路徑測試每輪明確設回「已核准」。
+  writeApproved.mockReturnValue(true);
 });
 
 describe("runTrustTransferDetection — confirm 自動回填(僅規則 1)", () => {
@@ -378,6 +388,36 @@ describe("runManualTransferBackfill — Jeff 確認後的落地路(fail-closed)"
     const res2 = await runManualTransferBackfill({ deferredIds: [601, 602], bankTransactionId: 900 });
     expect(res2.ok).toBe(false);
     expect(res2.error).toContain("some deferredIds not found");
+  });
+});
+
+describe("機械閘未核准 → 強制 dry-run / 拒絕(B1.1 P0.1 fail-closed)", () => {
+  it("閘=false:呼叫端給 dryRun:false + 有真配對 → 仍零寫入(強制 dry-run)", async () => {
+    writeApproved.mockReturnValue(false);
+    const { db, updates, inserted } = makeDb([[eligibleRow()], ACCOUNTS, transferTxns]);
+    getDb.mockResolvedValue(db);
+
+    const report = await runTrustTransferDetection({ dryRun: false, now: NOW });
+    // 配對照算(pairsFound=1),但一律當 dry-run:不 UPDATE、不 audit、不出卡、不動 Redis。
+    expect(report.pairsFound).toBe(1);
+    expect(report.backfilled).toBe(0);
+    expect(updates).toHaveLength(0);
+    expect(inserted).toHaveLength(0);
+    expect(systemAudit).not.toHaveBeenCalled();
+    expect(redisSet).not.toHaveBeenCalled();
+  });
+
+  it("閘=false:runManualTransferBackfill 直接拒絕,零 DB 存取零寫入", async () => {
+    writeApproved.mockReturnValue(false);
+    // getDb 給會炸的實作:證明被閘短路(根本沒碰 DB)。
+    getDb.mockImplementation(() => {
+      throw new Error("should not touch DB when write gate is closed");
+    });
+    const res = await runManualTransferBackfill({ deferredIds: [601, 602], bankTransactionId: 900 });
+    expect(res.ok).toBe(false);
+    expect(res.error).toContain("blocked");
+    expect(res.error).toContain("not approved");
+    expect(systemAudit).not.toHaveBeenCalled();
   });
 });
 

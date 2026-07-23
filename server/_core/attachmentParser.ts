@@ -78,20 +78,40 @@ export type AttachmentKind =
 export type AttachmentParseStatus =
   | "ok"
   | "ok_truncated"
+  /** Fragmentary text only — the document as a whole was NOT reliably read
+   *  (thin primary text layer + Claude fallback failed). The fragment is kept
+   *  in `text` for Jeff, but this is a NON-readable status: the reply gate
+   *  must force escalation (Codex 14:07 P1-1). */
+  | "partial"
   | "too_large"
   | "empty"
   | "unsupported"
-  | "parse_error";
+  | "parse_error"
+  /** The attachment exists but was never parsed at all (per-message cap
+   *  overflow, whole-hydration failure, spam-rescue replay without stored
+   *  bytes). NON-readable: existence evidence must reach the reply gate so
+   *  an attachment-bearing email is never treated as attachment-free
+   *  (Codex 14:07 P1-3). */
+  | "not_processed";
+
+/** Statuses whose text may be treated as a (possibly truncated) full read.
+ *  Everything else — including partial and not_processed — is non-readable
+ *  and must force escalation at the reply gate. */
+export const READABLE_PARSE_STATUSES: ReadonlySet<AttachmentParseStatus> =
+  new Set(["ok", "ok_truncated"]);
 
 export type AttachmentParseResult = {
   filename: string;
   mimeType: string;
   kind: AttachmentKind;
   sizeBytes: number;
-  /** Plain-text extracted content. Empty if parseStatus !== ok/ok_truncated. */
+  /** Plain-text extracted content. Empty unless parseStatus is
+   *  ok/ok_truncated, or partial (fragment only — not a full read). */
   text: string;
   parseStatus: AttachmentParseStatus;
-  /** Set when parseStatus === parse_error. */
+  /** Set for parse_error / partial / not_processed. Internal observability
+   *  only (logs + Jeff metadata) — must never enter a customer-facing LLM
+   *  prompt or draft (Codex 14:07 §四.2). */
   parseError?: string;
 };
 
@@ -117,7 +137,17 @@ export function buildFileContextText(results: AttachmentParseResult[]): string {
             ? "(空檔)"
             : r.parseStatus === "unsupported"
               ? "(不支援的檔案類型)"
-              : "(這個檔讀不出內容)";
+              : r.parseStatus === "not_processed"
+                ? "(這個檔系統沒有處理到,請開原始檔確認)"
+                : r.parseStatus === "partial"
+                  ? "(只讀出零碎片段,不是完整內容,請開原始檔確認)"
+                  // parse_error 到這裡代表系統該試的都試過了(PDF 含 Claude 備援)
+                  // — 給 Jeff 清楚的人工作業提示,不是可重試狀態。
+                  : "(這個檔系統讀不出來,請開原始檔確認)";
+      // partial 保留零碎片段給 Jeff 參考,但註記在前,不冒充完整內容。
+      if (r.parseStatus === "partial" && r.text.trim()) {
+        return `${header}\n${note}\n${r.text.trim()}`;
+      }
       return `${header}\n${note}`;
     })
     .filter((block) => block.length > 0)
@@ -208,17 +238,37 @@ export async function parseAttachment(
 
   try {
     let text = "";
+    let pdfPagesTruncated: { parsedPages: number; totalPages: number } | undefined;
     switch (kind) {
       case "pdf": {
-        text = await parsePdf(data);
-        // Scanned / photographed PDFs have no text layer → pdf-parse returns
-        // ~nothing. Fall back to Claude reading the PDF natively so we still
-        // see the content (passports, scanned itineraries, fax-to-PDF).
-        if (normalizeWhitespace(text).length < 40) {
-          const { extractPdfText } = await import("./imageOcr");
-          const r = await extractPdfText(data, filename);
-          if (r.ok) text = r.text;
+        const pdf = await parsePdfWithFallback(data, filename);
+        if (!pdf.ok) {
+          // Both the primary parser AND the Claude-native fallback failed —
+          // only now is a non-readable verdict allowed (pdf-attachment-
+          // reliability, 2026-07-15: a primary throw used to skip the
+          // fallback entirely). parseError is for logs/Jeff only; the
+          // customer-facing reply gate must never let it leak into a draft.
+          const fragment = normalizeWhitespace(pdf.fragment ?? "");
+          if (fragment) {
+            // Codex 14:07 P1-1 — thin text layer + fallback failure is NOT a
+            // full read: keep the fragment for Jeff, mark partial (forces
+            // escalation at the reply gate), never ok.
+            return {
+              ...base,
+              text: fragment,
+              parseStatus: "partial",
+              parseError: pdf.error.slice(0, 200),
+            };
+          }
+          return {
+            ...base,
+            text: "",
+            parseStatus: "parse_error",
+            parseError: pdf.error.slice(0, 200),
+          };
         }
+        text = pdf.text;
+        pdfPagesTruncated = pdf.pagesTruncated;
         break;
       }
       case "xlsx":
@@ -241,18 +291,22 @@ export async function parseAttachment(
       case "image": {
         // 2026-06-13 — actually READ the image via Claude vision (downscale
         // first). Customers send posters / itinerary screenshots; bouncing
-        // them is bad service. Only fall back to a placeholder if reading
-        // genuinely fails (corrupt image / model error), never on size.
+        // them is bad service.
         const { extractImageText } = await import("./imageOcr");
         const ocr = await extractImageText(data, filename);
         if (ocr.ok) {
           text = ocr.text;
           break;
         }
+        // Codex 14:07 P1-2 — OCR failure is a NON-readable outcome. The old
+        // code returned a placeholder with parseStatus="ok", so the reply
+        // gate treated a genuinely unread image as readable and never
+        // escalated. parse_error is honest: vision was tried and failed.
         return {
           ...base,
-          text: `[圖片附件 / image attachment: ${filename}, ${formatBytes(sizeBytes)} — 系統暫時讀不出內容]`,
-          parseStatus: "ok",
+          text: "",
+          parseStatus: "parse_error",
+          parseError: "image OCR failed (vision read unreadable)",
         };
       }
       case "unknown":
@@ -268,10 +322,22 @@ export async function parseAttachment(
     if (normalized.length === 0) {
       return { ...base, text: "", parseStatus: "empty" };
     }
+    // Codex 14:07 §四.1 — a PDF longer than the page cap is a TRUNCATED read:
+    // surface the parsed/total page fact and mark ok_truncated, never plain ok.
+    const pageMarker = pdfPagesTruncated
+      ? `\n\n[... PDF 共 ${pdfPagesTruncated.totalPages} 頁,僅解析前 ${pdfPagesTruncated.parsedPages} 頁 / only first ${pdfPagesTruncated.parsedPages} of ${pdfPagesTruncated.totalPages} pages parsed ...]`
+      : "";
     if (normalized.length > MAX_TEXT_CHARS) {
       return {
         ...base,
-        text: normalized.slice(0, MAX_TEXT_CHARS) + TRUNCATION_MARKER,
+        text: normalized.slice(0, MAX_TEXT_CHARS) + TRUNCATION_MARKER + pageMarker,
+        parseStatus: "ok_truncated",
+      };
+    }
+    if (pageMarker) {
+      return {
+        ...base,
+        text: normalized + pageMarker,
         parseStatus: "ok_truncated",
       };
     }
@@ -292,34 +358,95 @@ export async function parseAttachment(
 }
 
 // ────────────────────────────────────────────────────────────────────────
-// PDF — pdf-parse already installed (used elsewhere for receipt OCR)
+// PDF — primary pdf-parse v2 (via the shared adapter) + Claude-native
+// fallback. pdf-attachment-reliability (2026-07-15): the old code used the
+// v1 callable API against the installed v2 class → EVERY pdf died with
+// "pdf-parse export is not callable" before reading a byte, and because the
+// primary threw, the Claude fallback never ran either. All pdf-parse access
+// now lives in _core/pdfParse.ts (single adapter, shared with
+// agents/pdfTextExtractor.ts).
 // ────────────────────────────────────────────────────────────────────────
 
-type PdfParseFn = (data: Buffer, opts?: { max?: number }) => Promise<{ text?: string }>;
+type PdfChainResult =
+  | {
+      ok: true;
+      text: string;
+      /** Set when the primary parser read fewer pages than the document has
+       *  (page cap) — caller must mark the result ok_truncated. */
+      pagesTruncated?: { parsedPages: number; totalPages: number };
+    }
+  | {
+      ok: false;
+      error: string;
+      /** Thin/fragmentary primary text (when primary succeeded but the
+       *  fallback failed) — caller marks it partial, never ok. */
+      fragment?: string;
+    };
 
 /**
- * Resolve pdf-parse's callable across bundler interop shapes. The old code did
- * `module.default ?? module`, which broke in the prod esbuild bundle: there the
- * import is double-wrapped as `{ default: { default: fn } }`, so `.default` is a
- * truthy OBJECT (not the function) and `??` picks it → "pdfParse is not a
- * function" at call time, silently killing all PDF reading. Walk the chain and
- * typeof-check instead. Pure + exported so the resolution is unit-tested.
+ * Primary parser + Claude-native fallback chain:
+ *   - primary succeeds with a real text layer → use it (no LLM call);
+ *     document longer than the page cap → pagesTruncated is set
+ *   - primary THROWS, or returns empty/thin text → Claude reads the PDF
+ *     natively (scanned/photographed PDFs, and any primary-parser failure)
+ *   - fallback also fails → { ok:false } in every case (Codex 14:07 P1-1):
+ *       · primary threw → parse_error downstream
+ *       · primary succeeded but thin/empty → fragment carries what little it
+ *         saw; downstream marks it partial (non-readable), never ok/empty
  */
-export function resolvePdfParse(mod: any): PdfParseFn | null {
-  if (typeof mod === "function") return mod;
-  if (typeof mod?.default === "function") return mod.default;
-  if (typeof mod?.default?.default === "function") return mod.default.default;
-  return null;
-}
+async function parsePdfWithFallback(
+  data: Buffer,
+  filename: string
+): Promise<PdfChainResult> {
+  const { extractPdfTextPrimary, MIN_PDF_TEXT_CHARS } = await import(
+    "./pdfParse"
+  );
 
-async function parsePdf(data: Buffer): Promise<string> {
-  // Dynamic import — pdf-parse pulls in a heavy debug fixture on require;
-  // dynamic load avoids slowing cold start.
-  const mod = await import("pdf-parse");
-  const pdfParse = resolvePdfParse(mod);
-  if (!pdfParse) throw new Error("pdf-parse export is not callable");
-  const result = await pdfParse(data, { max: 50 }); // cap at 50 pages
-  return result.text ?? "";
+  let primaryText = "";
+  let primaryError: string | null = null;
+  let pagesTruncated: { parsedPages: number; totalPages: number } | undefined;
+  try {
+    const primary = await extractPdfTextPrimary(data);
+    primaryText = primary.text;
+    if (primary.pageCount > primary.parsedPages) {
+      pagesTruncated = {
+        parsedPages: primary.parsedPages,
+        totalPages: primary.pageCount,
+      };
+    }
+  } catch (err) {
+    primaryError = err instanceof Error ? err.message : String(err);
+    log.warn(
+      { filename, err: primaryError },
+      "[attachmentParser] pdf primary parser threw — consulting Claude fallback"
+    );
+  }
+
+  const thin = normalizeWhitespace(primaryText).length < MIN_PDF_TEXT_CHARS;
+  if (!primaryError && !thin) return { ok: true, text: primaryText, pagesTruncated };
+
+  // Scanned / photographed PDFs have no text layer, and a primary-parser
+  // failure must not be terminal: fall back to Claude reading the PDF
+  // natively (passports, scanned itineraries, fax-to-PDF). Never throws.
+  const { extractPdfText } = await import("./imageOcr");
+  const fallback = await extractPdfText(data, filename);
+  if (fallback.ok) return { ok: true, text: fallback.text };
+
+  if (primaryError) {
+    return {
+      ok: false,
+      error: `primary: ${primaryError}; fallback: unreadable`,
+    };
+  }
+  // Codex 14:07 P1-1 — primary succeeded but empty/thin AND the fallback
+  // failed: the document was NOT reliably read. Old behavior returned ok
+  // here, so a watermark-only scan read as a full read and the reply gate
+  // never escalated. Surface the fragment; caller marks it partial.
+  return {
+    ok: false,
+    error: "primary: thin/empty text layer; fallback: unreadable",
+    fragment: primaryText,
+  };
 }
 
 // ────────────────────────────────────────────────────────────────────────

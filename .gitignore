@@ -166,3 +166,6 @@ dump.rdb
 AI交流
 .obsidian/
 Pack&Go 專案/
+# 本機 Claude memory symlink(docs/記憶 → ~/.claude/.../memory),只在本機存在,
+# 絕不提交。錨定根路徑避免誤匹配其他層級同名檔。(Codex 6.6 裁定保留並精確化)
+/docs/記憶

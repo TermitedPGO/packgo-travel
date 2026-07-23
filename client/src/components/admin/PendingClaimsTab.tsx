@@ -41,7 +41,7 @@ export default function PendingClaimsTab() {
   const dateLocale = language === "zh-TW" ? zhTW : enUS;
 
   const utils = trpc.useUtils();
-  const { data, isLoading } = trpc.bankTransactionLinks.listPending.useQuery({ limit: 100 });
+  const { data, isLoading, isError } = trpc.bankTransactionLinks.listPending.useQuery({ limit: 100 });
 
   const [choices, setChoices] = useState<Record<number, ClaimChoice>>({});
   const [amounts, setAmounts] = useState<Record<number, string>>({});
@@ -118,7 +118,23 @@ export default function PendingClaimsTab() {
             </thead>
             <tbody className="divide-y divide-gray-100">
               {isLoading && <LoadingRow />}
-              {!isLoading && items.length === 0 && (
+              {/* 1A0a U6:讀取失敗 ≠ 空清單 */}
+              {!isLoading && isError && data === undefined && (
+                <tr>
+                  <td colSpan={5} className="px-4 py-12 text-center text-amber-700">
+                    {t("pendingClaimsTab.loadFailed")}
+                  </td>
+                </tr>
+              )}
+              {/* cached refetch 失敗 = stale,不得顯真空清單(Codex 7-18 P1-6) */}
+              {!isLoading && isError && data !== undefined && (
+                <tr>
+                  <td colSpan={5} className="px-4 py-3 text-center text-xs text-amber-700">
+                    {t("financeCockpit.truth.staleHint")}
+                  </td>
+                </tr>
+              )}
+              {!isLoading && !isError && items.length === 0 && (
                 <tr>
                   <td colSpan={5} className="px-4 py-12 text-center text-gray-500">
                     {t("pendingClaimsTab.emptyList")}

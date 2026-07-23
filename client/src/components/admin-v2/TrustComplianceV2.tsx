@@ -50,6 +50,7 @@ import {
   LandingGreeting,
 } from "@/components/admin/landings/landingPrimitives";
 import { useLocale } from "@/contexts/LocaleContext";
+import { resolveTileState } from "@/components/admin-v2/FinanceCockpit/cockpitMath";
 
 /* ── helpers ─────────────────────────────────────────────────────────── */
 
@@ -151,6 +152,15 @@ export default function TrustComplianceV2() {
 
   const driftClean = Math.abs(agg.drift) < DRIFT_CLEAN_THRESHOLD;
 
+  // 1A0a(Codex 7-18 P1-4):頁首/KPI 與 recon 狀態一致 —— 冷啟失敗不得顯
+  // 假 $0 與假「勾稽乾淨」;stale 顯舊值+標記。
+  const reconState = resolveTileState({
+    isLoading: recon.isLoading,
+    isError: recon.isError,
+    hasData: recon.data !== undefined,
+  });
+  const reconHasValue = reconState === "ready" || reconState === "stale";
+
   const yearOptions = useMemo(() => {
     const out: number[] = [];
     for (let y = now.getFullYear(); y >= MIN_YEAR; y--) out.push(y);
@@ -180,7 +190,7 @@ export default function TrustComplianceV2() {
       <LandingGreeting
         title={t("admin.trustCompliance.title")}
         subtitle={t("admin.trustCompliance.subtitle", {
-          outstanding: fmt(agg.outstanding),
+          outstanding: reconHasValue ? fmt(agg.outstanding) : "—",
         })}
       />
 
@@ -207,8 +217,17 @@ export default function TrustComplianceV2() {
         </div>
       )}
 
-      {/* ── Reconciliation KPI strip ── */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+      {/* ── Reconciliation KPI strip(1A0a:transport-error 整條錯誤態,stale 標記) ── */}
+      {reconState === "transport-error" ? (
+        <div className="rounded-xl border border-amber-200 bg-amber-50 p-4 text-xs text-amber-700">
+          {t("admin.trustCompliance.loadFailed")}
+        </div>
+      ) : (
+      <>
+      {reconState === "stale" && (
+        <div className="text-[11px] text-foreground/40">{t("financeCockpit.truth.staleHint")}</div>
+      )}
+      <div className={`grid grid-cols-2 lg:grid-cols-4 gap-3 ${reconState === "stale" ? "opacity-60" : ""}`}>
         <KpiCard
           icon={Lock}
           label={t("admin.trustCompliance.kpiOutstanding")}
@@ -248,6 +267,8 @@ export default function TrustComplianceV2() {
           loading={recon.isLoading}
         />
       </div>
+      </>
+      )}
 
       {/* ── Per-account reconciliation ── */}
       <SectionCard
@@ -258,6 +279,16 @@ export default function TrustComplianceV2() {
         {recon.isLoading ? (
           <div className="py-6 text-center text-xs text-foreground/40">
             {t("admin.trustCompliance.loading")}
+          </div>
+        ) : recon.isError && recon.data === undefined ? (
+          /* 1A0a U5:讀取失敗不再被空清單語意吞掉 */
+          <div className="py-6 text-center text-xs text-amber-700">
+            {t("admin.trustCompliance.loadFailed")}
+          </div>
+        ) : recon.isError && accounts.length === 0 ? (
+          /* 1A0a(Codex 7-18 R3):cached-empty + refetch 失敗 = stale,不得畫成乾淨「無帳戶」 */
+          <div className="py-6 text-center text-xs text-amber-700">
+            {t("financeCockpit.truth.staleHint")}
           </div>
         ) : accounts.length === 0 ? (
           <div className="py-6 text-center text-xs text-foreground/40">
@@ -361,12 +392,26 @@ export default function TrustComplianceV2() {
           <div className="py-6 text-center text-xs text-foreground/40">
             {t("admin.trustCompliance.loading")}
           </div>
+        ) : deferredList.isError && deferredList.data === undefined ? (
+          /* 1A0a U5:讀取失敗 ≠ 空清單 */
+          <div className="py-6 text-center text-xs text-amber-700">
+            {t("admin.trustCompliance.loadFailed")}
+          </div>
+        ) : deferredList.isError && (deferredList.data ?? []).length === 0 ? (
+          /* cached empty + refetch 失敗 = stale,不得顯真空清單(Codex 7-18 P1-6) */
+          <div className="py-6 text-center text-xs text-amber-700">
+            {t("financeCockpit.truth.staleHint")}
+          </div>
         ) : (deferredList.data ?? []).length === 0 ? (
           <div className="py-6 text-center text-xs text-foreground/40">
             {t("admin.trustCompliance.listEmpty")}
           </div>
         ) : (
           <div className="overflow-x-auto">
+            {/* cached-nonempty + refetch 失敗 = stale 標記(Codex 7-18 R3:與主 list 一致) */}
+            {deferredList.isError && (
+              <div className="pb-1 text-[10px] text-amber-700">{t("financeCockpit.truth.staleHint")}</div>
+            )}
             <table className="w-full text-xs">
               <thead>
                 <tr className="text-left text-foreground/45 border-b border-foreground/10">
@@ -487,7 +532,15 @@ export default function TrustComplianceV2() {
           </Button>
         </div>
 
-        {/* summary tiles */}
+        {/* summary tiles(1A0a U5:audit 讀取失敗顯性,不折 $0;stale 標記) */}
+        {audit.isError && audit.data !== undefined && (
+          <div className="text-[11px] text-amber-700">{t("financeCockpit.truth.staleHint")}</div>
+        )}
+        {audit.isError && audit.data === undefined ? (
+          <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-xs text-amber-700">
+            {t("admin.trustCompliance.loadFailed")}
+          </div>
+        ) : (
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           <div className="rounded-lg border border-foreground/10 p-3">
             <div className="flex items-center gap-1.5 text-xs font-semibold text-foreground/70">
@@ -495,11 +548,11 @@ export default function TrustComplianceV2() {
               {t("admin.trustCompliance.auditTransferTile")}
             </div>
             <div className="mt-1 text-base font-bold tabular-nums text-foreground">
-              {fmtSigned(auditSummary?.transferTotal ?? 0)}
+              {auditSummary !== undefined ? fmtSigned(auditSummary.transferTotal) : "—"}
             </div>
             <div className="text-[11px] text-foreground/45">
               {t("admin.trustCompliance.auditTransferDesc", {
-                count: String(auditSummary?.transferCount ?? 0),
+                count: auditSummary !== undefined ? String(auditSummary.transferCount) : "—",
               })}
             </div>
           </div>
@@ -509,15 +562,16 @@ export default function TrustComplianceV2() {
               {t("admin.trustCompliance.auditReviewTile")}
             </div>
             <div className="mt-1 text-base font-bold tabular-nums text-foreground">
-              {fmt(auditSummary?.otherReviewTotal ?? 0)}
+              {auditSummary !== undefined ? fmt(auditSummary.otherReviewTotal) : "—"}
             </div>
             <div className="text-[11px] text-foreground/45">
               {t("admin.trustCompliance.auditReviewDesc", {
-                count: String(auditSummary?.otherReviewCount ?? 0),
+                count: auditSummary !== undefined ? String(auditSummary.otherReviewCount) : "—",
               })}
             </div>
           </div>
         </div>
+        )}
 
         {/* preview table (first 20 rows) */}
         {auditRecords.length > 0 && (

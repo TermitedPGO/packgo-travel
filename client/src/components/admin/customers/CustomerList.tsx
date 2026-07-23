@@ -79,17 +79,22 @@ export default function CustomerList({
               >
                 {c.initials}
               </div>
-              {/* customer-unread (0108) — 客人來訊未讀:實心紅點(優先於 agent 訊息點) */}
+              {/* Avatar red has ONE meaning: unseen inbound customer mail.
+                  Rendering the agent-message count in the same spot made a
+                  read row look permanently unread. */}
               {c.unread && !c.blocked && (
                 <span className="absolute -top-0.5 -right-0.5 w-2 h-2 bg-red-500 rounded-full" />
               )}
-              {!c.unread && c.notifs > 0 && !c.blocked && (
-                <span className="absolute -top-0.5 -right-0.5 w-2.5 h-2.5 rounded-full bg-rose-500 border-2 border-white" />
-              )}
             </div>
-            <div className="flex-1 min-w-0">
-              <div className={`text-[13px] truncate flex items-center gap-1.5 ${c.unread && !c.blocked ? "font-semibold" : "font-medium"}`}>
-                {c.name}
+            <div data-customer-row-info className="flex-1 min-w-0">
+              <div className={`text-[13px] min-w-0 flex items-center gap-1.5 ${c.unread && !c.blocked ? "font-semibold" : "font-medium"}`}>
+                <span
+                  data-customer-row-name
+                  className="min-w-0 truncate"
+                  title={c.name}
+                >
+                  {c.name}
+                </span>
                 {c.blocked && (
                   <span className="text-[9px] px-1 py-0.5 rounded-md bg-gray-200 text-gray-500 font-normal flex-shrink-0">
                     {t("admin.customers.blockedBadge")}
@@ -103,44 +108,51 @@ export default function CustomerList({
               </div>
               <div className="text-[11px] text-gray-400 truncate">{c.email}</div>
             </div>
-            {/* Per-row mark / restore — works for both registered accounts and
-                email guests (suppliers like uvbookings can be hidden here too). */}
-            <button
-              type="button"
-              title={c.blocked ? t("admin.customers.restoreAction") : t("admin.customers.hideAction")}
-              onClick={(e) => {
-                e.stopPropagation()
-                const ref = { id: c.id, kind: c.kind }
-                if (c.blocked) onRestoreCustomer(ref)
-                else onMarkNotCustomer(ref)
-              }}
-              className="flex-shrink-0 p-1.5 rounded-lg text-gray-400 opacity-0 group-hover:opacity-100 hover:bg-gray-200 hover:text-gray-700 transition-all"
-            >
-              {c.blocked ? <RotateCcw className="w-3.5 h-3.5" /> : <EyeOff className="w-3.5 h-3.5" />}
-            </button>
-            {/* 訪客刪除 (guests only) — opens the in-app rounded-xl confirm
-                card, never the native browser dialog. Registered accounts can
-                only be hidden. */}
-            {c.kind === "guest" && (
-              <button
-                type="button"
-                title={t("admin.customers.deleteConfirm.action")}
-                onClick={(e) => {
-                  e.stopPropagation()
-                  setConfirmDelete(c)
-                }}
-                className="flex-shrink-0 p-1.5 rounded-lg text-gray-400 opacity-0 group-hover:opacity-100 hover:bg-red-50 hover:text-red-600 transition-all"
+            {/* Trailing metadata owns one fixed slot. Row actions overlay that
+                slot on hover/focus instead of invisibly consuming 36–72px of
+                the customer's name at all times. */}
+            <div className="relative w-12 self-stretch flex-shrink-0">
+              <div className="absolute inset-y-0 right-0 flex flex-col justify-center text-right transition-opacity group-hover:opacity-0 group-focus-within:opacity-0">
+                <div className="text-[10px] text-gray-400">{c.lastContact}</div>
+                <span
+                  className={`text-[10px] px-1.5 py-0.5 rounded-md inline-block mt-0.5 ${TAG_STYLES[c.tag] ?? ""}`}
+                >
+                  {c.tagLabel}
+                </span>
+              </div>
+              <div
+                data-customer-row-actions
+                className="absolute right-0 top-1/2 -translate-y-1/2 flex items-center gap-0.5 rounded-lg bg-gray-50/95 opacity-0 pointer-events-none group-hover:opacity-100 group-hover:pointer-events-auto group-focus-within:opacity-100 group-focus-within:pointer-events-auto transition-opacity"
               >
-                <Trash2 className="w-3.5 h-3.5" />
-              </button>
-            )}
-            <div className="text-right flex-shrink-0">
-              <div className="text-[10px] text-gray-400">{c.lastContact}</div>
-              <span
-                className={`text-[10px] px-1.5 py-0.5 rounded-md inline-block mt-0.5 ${TAG_STYLES[c.tag] ?? ""}`}
-              >
-                {c.tagLabel}
-              </span>
+                {/* Per-row mark / restore — works for registered + guests. */}
+                <button
+                  type="button"
+                  title={c.blocked ? t("admin.customers.restoreAction") : t("admin.customers.hideAction")}
+                  onClick={(e) => {
+                    e.stopPropagation()
+                    const ref = { id: c.id, kind: c.kind }
+                    if (c.blocked) onRestoreCustomer(ref)
+                    else onMarkNotCustomer(ref)
+                  }}
+                  className="flex-shrink-0 p-1.5 rounded-lg text-gray-400 hover:bg-gray-200 hover:text-gray-700 transition-colors"
+                >
+                  {c.blocked ? <RotateCcw className="w-3.5 h-3.5" /> : <EyeOff className="w-3.5 h-3.5" />}
+                </button>
+                {/* Guest deletion keeps the audited in-app confirmation card. */}
+                {c.kind === "guest" && (
+                  <button
+                    type="button"
+                    title={t("admin.customers.deleteConfirm.action")}
+                    onClick={(e) => {
+                      e.stopPropagation()
+                      setConfirmDelete(c)
+                    }}
+                    className="flex-shrink-0 p-1.5 rounded-lg text-gray-400 hover:bg-red-50 hover:text-red-600 transition-colors"
+                  >
+                    <Trash2 className="w-3.5 h-3.5" />
+                  </button>
+                )}
+              </div>
             </div>
           </div>
         ))}

@@ -53,6 +53,7 @@ import { and, eq, gte, inArray, isNull, isNotNull } from "drizzle-orm";
 import { createChildLogger } from "../_core/logger";
 import { systemAudit } from "../_core/auditLog";
 import { dateOnly } from "./trustOutstandingSplit";
+import { isTrustTransferWriteApproved } from "./trustTransferWriteGate";
 
 const log = createChildLogger({ module: "trustTransferDetection" });
 
@@ -338,7 +339,10 @@ export async function runTrustTransferDetection(opts?: {
   dryRun?: boolean;
   now?: Date;
 }): Promise<TransferDetectionReport> {
-  const dryRun = opts?.dryRun ?? false;
+  // B1.1 機械閘(Codex 6.5 P0.1):矩陣未核准前,無論呼叫端傳 dryRun:false,一律
+  // 強制 dry-run —— 不回填 transferredAt、不出催轉卡、不動 Redis。翻閘見
+  // trustTransferWriteGate.isTrustTransferWriteApproved(現硬回 false)。
+  const dryRun = isTrustTransferWriteApproved() ? (opts?.dryRun ?? false) : true;
   const now = opts?.now ?? new Date();
   try {
     const db = await getDb();
@@ -531,8 +535,9 @@ async function postOverdueReminder(
           .join("\n") +
         (overdue.length > 20 ? `\n…及其餘 ${overdue.length - 20} 筆` : "") +
         suggestionSection +
-        `\n\n§17550:認列後的錢應從 Trust #5442 轉到 Operating #2174。若實際已轉但日期久遠/金額被合併,` +
-        `偵測配對不到,請到財務頁核對後人工處理;若真的沒轉,請盡快轉出。` +
+        `\n\n這是歷史已認列列的轉出「觀察」(僅供對帳),系統不催轉、不自動轉。` +
+        `這些 recognizedAt 屬 legacy_unverified —— 可能來自舊出發日規則,未經 CPA 認列矩陣` +
+        `與律師提領矩陣覆核前,不作為可提領/可轉出的依據。是否轉出由你在矩陣核准後親自裁定。` +
         `\n(同一批未轉列+建議只提醒一次,集合變化才會再出卡。)`,
       priority: "high" as const,
     });
@@ -566,6 +571,15 @@ export async function runManualTransferBackfill(input: {
   deferredIds: number[];
   bankTransactionId: number;
 }): Promise<ManualBackfillResult> {
+  // B1.1 機械閘(Codex 6.5 P0.1):矩陣未核准前,人工回填路徑直接拒絕零寫入。
+  // 翻閘見 trustTransferWriteGate.isTrustTransferWriteApproved(現硬回 false)。
+  if (!isTrustTransferWriteApproved()) {
+    return {
+      ok: false,
+      backfilled: 0,
+      error: "blocked: trust withdrawal/recognition matrices not approved",
+    };
+  }
   try {
     const db = await getDb();
     if (!db) return { ok: false, backfilled: 0, error: "DB unavailable" };

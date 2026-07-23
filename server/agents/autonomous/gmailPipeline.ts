@@ -70,6 +70,7 @@ import {
 // so gmailPipeline.noise.test.ts + any legacy importer keep resolving them.
 export { isNoreplySender, isKnownNoise };
 import { decideInteractionOrderAssignment } from "../../_core/interactionOrderAssignment";
+import { finalizeAutonomousDraft } from "./attachmentReplyGate";
 import { listCustomOrdersByProfile } from "../../db/customOrder";
 // invokeLLM is dynamically imported inside resolveInboundInteractionOrderId
 // (not statically here) — a static import pulls in _core/llm's module-init
@@ -1418,6 +1419,42 @@ async function processOneEmail(
     }
   }
 
+  // Codex 16:02 P1-3 — FINAL canonical chokepoint. The agent's attachment
+  // gate ran before the augmentation above (CTA carries Markdown ** and em
+  // dashes), so the string it approved is not necessarily the string that
+  // goes out. Canonicalize + re-gate HERE, after all autonomous
+  // augmentation; decision.draftReply from this point on IS the exact
+  // bodyText handed to sendReplyInThread below — same bytes, no later
+  // mutation. Runs before evaluateAutoSend so forceEscalate kills real
+  // sends through the normal "escalated" verdict. Jeff-manual edits keep
+  // their own responsibility boundary (design.md §五).
+  {
+    const finalized = finalizeAutonomousDraft({
+      draftReply: decision.draftReply || "",
+      attachments: attachmentsForAgent.map((a) => ({
+        filename: a.filename,
+        parseStatus: a.parseStatus,
+      })),
+    });
+    decision.draftReply = finalized.bodyText;
+    if (finalized.forceEscalate) {
+      decision.shouldEscalate = true;
+      // Codex 12:01 §五.3 — never leave the contradictory state
+      // shouldEscalate=true / shouldAutoReply=true: escalation MEANS a human
+      // sends. (autoSendGate independently hard-excludes attachment mail;
+      // this keeps the decision object honest for every downstream reader.)
+      decision.shouldAutoReply = false;
+      if (finalized.reason) {
+        decision.escalationReason = decision.escalationReason
+          ? `${decision.escalationReason} ${finalized.reason}`
+          : finalized.reason;
+      }
+      // The finalizer no longer drops drafts (Codex 12:01 §五.2 — the matcher
+      // is advisory; bodyText is always the preserved canonical draft, and
+      // the risk hint travels in finalized.reason for the card).
+    }
+  }
+
   // Phase 2: respect autoSendEnabled + autoSendMinConfidence in policy
   // (When ON + conf ≥ threshold + agent says draft-not-escalate, the action
   //  is marked as "would_auto_send". Actually sending the email is gated by
@@ -1504,7 +1541,15 @@ async function processOneEmail(
   let sentGmailMessageId: string | undefined;
   if (gate.verdict === "shadow" && senderEmail) {
     sendOutcome = "would_auto_send";
-  } else if (gate.verdict === "send" && meetsAutoSend && senderEmail) {
+  } else if (
+    gate.verdict === "send" &&
+    meetsAutoSend &&
+    senderEmail &&
+    // batch-3 adversarial finding — never auto-send an EMPTY body: a dropped
+    // or genuinely blank canonical draft must fall through to the human
+    // path, not mail the customer a blank reply.
+    decision.draftReply.trim().length > 0
+  ) {
     try {
       const send = await sendReplyInThread(sendCtx.gmail, {
         threadId: msg.threadId,

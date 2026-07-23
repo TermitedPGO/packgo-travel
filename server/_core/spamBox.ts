@@ -89,6 +89,55 @@ export interface RescueResult {
 }
 
 /**
+ * Codex 14:07 P1-3 — rebuild attachment EXISTENCE evidence from a stored
+ * interaction content blob for the rescue replay. gmailPipeline appends a
+ * 【附件】 summary block ("N. filename (kind, size, status)" per line) to the
+ * interaction content at filing time; the parsed text itself is never stored.
+ * Each summary line becomes a not_processed sentinel: the replayed agent run
+ * can't read the attachment, so the reply gate must escalate — never draft
+ * as if the attachments were read (or absent). Pure; exported for tests.
+ */
+export function rebuildAttachmentSentinelsFromContent(content: string): Array<{
+  filename: string;
+  kind: string;
+  sizeBytes: number;
+  text: string;
+  parseStatus: string;
+  parseError: string;
+}> {
+  const block = content.match(/【附件】\n([\s\S]*)$/);
+  if (!block) return [];
+  const out: Array<{
+    filename: string;
+    kind: string;
+    sizeBytes: number;
+    text: string;
+    parseStatus: string;
+    parseError: string;
+  }> = [];
+  for (const line of block[1].split("\n")) {
+    // "1. trip.pdf (pdf, 141KB, ok)" — filename may itself contain spaces or
+    // parens; anchor on the LAST parenthetical (kind, size, status).
+    const m = line.match(/^\d+\.\s+(.+)\s\(([^()]*)\)\s*$/);
+    if (!m) {
+      if (out.length > 0) break; // past the summary block
+      continue;
+    }
+    const meta = m[2].split(",").map((s) => s.trim());
+    out.push({
+      filename: m[1],
+      kind: meta[0] || "unknown",
+      sizeBytes: 0,
+      text: "",
+      parseStatus: "not_processed",
+      parseError:
+        "spam-rescue replay: attachment content was not stored at filing time — not re-parsed",
+    });
+  }
+  return out;
+}
+
+/**
  * 救回: spam row → real inquiry → InquiryAgent draft → cs approval task.
  * Throws when the row is missing, not spam-classified, or already rescued.
  */
@@ -135,6 +184,13 @@ export async function rescueSpamInteraction(
     0,
     255,
   );
+  // Codex 14:07 P1-3 — the rescue replay only has the interaction row's
+  // TEXT (body + attachment summary); the parsed attachment contents were
+  // never stored. Rebuild sentinel entries from the summary so the agent's
+  // attachment gate still sees the attachments EXIST (not_processed →
+  // force escalation, no auto-send) instead of drafting as if the email
+  // had no attachments.
+  const replayAttachments = rebuildAttachmentSentinelsFromContent(row.content);
 
   // 1. Create the real inquiry first — even if the agent below dies, the
   //    customer now exists in the normal inbox flow (never lost again).
@@ -170,6 +226,7 @@ export async function rescueSpamInteraction(
     const agent = await runInquiryAgent({
       rawMessage: `${subject}\n\n${row.content}`,
       channel: "email",
+      attachments: replayAttachments.length > 0 ? replayAttachments : undefined,
       customerProfile: email
         ? { id: row.customerProfileId, email }
         : undefined,

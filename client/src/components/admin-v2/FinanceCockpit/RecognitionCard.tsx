@@ -1,10 +1,11 @@
 /**
- * RecognitionCard —— 待認列確認卡(F3 塊B#3,B-final 左欄第二卡)。
+ * RecognitionCard —— 到期待審卡(F3 塊B#3,B-final 左欄第二卡)。
  *
- * 「出發了 · 訂金可認列」:trustDeferredList(pending)前端摺 foldDepartedPending
- * (與 server trustOutstandingSplit.departedPending 同口徑 —— 卡上筆數 = 真相列
- * departedPendingCount)。「認列入帳」是 Jeff 按的錢的動作,接
- * plaid.trustRecognizeNow(server 端已接 audit);AI 不自動認列。
+ * B1 fail-closed(2026-07-12):「出發了 · 訂金到期待審」。trustDeferredList
+ * (pending)前端摺 foldDepartedPending(與 server trustOutstandingSplit.
+ * departedPending 同口徑 —— 卡上筆數 = 真相列 departedPendingCount)。按鈕接
+ * plaid.trustRecognizeNow —— 現為**唯讀掃描**(零寫入,server 端接 audit),
+ * 只列出到期待審;認列是 Jeff 的動錢權,等 CPA 認列矩陣核准後逐筆核。
  * 0 筆時整卡隱藏(空態由 WorkColumn 統一顯示)。
  */
 import { trpc } from "@/lib/trpc";
@@ -37,8 +38,7 @@ export function RecognitionCard() {
       } else {
         toast.success(
           t("financeCockpit.work.recogToastDone", {
-            count: String(r.recognized),
-            amount: fmtMoney(r.totalRecognizedAmount),
+            count: String(r.dueForReview),
           }),
         );
       }
@@ -48,8 +48,33 @@ export function RecognitionCard() {
 
   const { items, total, count } = foldDepartedPending(deferred.data as any, today);
 
-  // 0 筆(含 loading / error)不佔位 —— 空態與讀取失敗由 WorkColumn 的其它卡承載
-  if (count === 0) return null;
+  // 1A0a U7:讀取失敗且無任何快取值 → 顯性「無法核實」,不再靜默消失。
+  if (deferred.isError && deferred.data === undefined) {
+    return (
+      <div className="overflow-hidden rounded-xl border border-gray-200 bg-white">
+        <div className="px-4 py-4 text-center text-xs text-gray-400">
+          {t("financeCockpit.work.recogLoadError")}
+        </div>
+      </div>
+    );
+  }
+
+  // cached refetch 失敗 = stale(顯舊列+標記,Codex 7-18 P1-6/P2-1:stale 判定在
+  // count===0 return 之前,避免 stale 訊號被空態吞掉)
+  const stale = deferred.isError && deferred.data !== undefined;
+
+  // 真零且非 stale(有資料且 0 筆)或首載中不佔位 —— 空態由 WorkColumn 的 allClear 承載
+  if (count === 0 && !stale) return null;
+  // stale 但本頁 0 筆:顯最小 stale 提示卡(不靜默消失)
+  if (count === 0 && stale) {
+    return (
+      <div className="overflow-hidden rounded-xl border border-gray-200 bg-white">
+        <div className="px-4 py-4 text-center text-xs text-amber-700">
+          {t("financeCockpit.truth.staleHint")}
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="overflow-hidden rounded-xl border border-gray-200 bg-white">
@@ -58,7 +83,9 @@ export function RecognitionCard() {
           <Check className="h-3.5 w-3.5 text-gray-400" />
           {t("financeCockpit.work.recogCardTitle")}
         </div>
-        <div className="text-[11px] text-gray-500">{t("financeCockpit.work.recogCardMeta")}</div>
+        <div className="text-[11px] text-gray-500">
+          {stale ? t("financeCockpit.truth.staleHint") : t("financeCockpit.work.recogCardMeta")}
+        </div>
       </div>
 
       {items.map((row, i) => (
@@ -86,7 +113,7 @@ export function RecognitionCard() {
         </div>
       ))}
 
-      {/* 認列按鈕:批次認列所有已到期(server recognizeReadyDepartures + audit) */}
+      {/* 掃描按鈕:唯讀掃描所有到期待審(server scanRecognitionDue + audit,零寫入) */}
       <div className="flex items-center justify-between gap-3 border-t border-gray-100 bg-gray-50 px-4 py-2.5">
         <div className="text-[11px] text-gray-500">
           {t("financeCockpit.work.recogFooter", {

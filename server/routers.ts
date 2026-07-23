@@ -56,6 +56,8 @@ import { opsRouter } from "./routers/ops";
 import { storageRouter } from "./routers/storage";
 import { reconciliationRouter } from "./routers/reconciliation";
 import { bankTransactionLinksRouter } from "./routers/bankTransactionLinks";
+// 1A0a boot telemetry(plan v4.3 §3.2.9)— 換版證明上報(additive,不動財務行為)
+import { clientBootRouter } from "./routers/clientBoot";
 import { adminCleanupRouter } from "./routers/adminCleanup";
 import { posterGenRouter } from "./routers/posterGen";
 import { aiQuotesRouter } from "./routers/aiQuotes";
@@ -240,6 +242,8 @@ export const appRouter = router({
   reconciliation: reconciliationRouter,
   // F1 對帳引擎 塊A (2026-07-08) — 待認領入帳清單 + 人工認領
   bankTransactionLinks: bankTransactionLinksRouter,
+  // 1A0a boot telemetry — 換版證明(clientBoot.report,寫 adminAuditLog)
+  clientBoot: clientBootRouter,
 
   // 2026-05-22 — Cleanup tools for dev/test data surfacing in production:
   // findStale tours / test-looking inquiries / agent message noise +

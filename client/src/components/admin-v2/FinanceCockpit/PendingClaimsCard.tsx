@@ -280,11 +280,13 @@ export function PendingClaimsCard({ pending }: { pending: PendingTile }) {
           {t("financeCockpit.work.pendingCardTitle")}
         </div>
         <div className="text-[11px] text-gray-500">
-          {pending.count > 0 ? (
+          {pending.count !== null && pending.count > 0 && pending.total !== null ? (
             <>
               {t("financeCockpit.work.pendingCardMetaCount", { count: String(pending.count) })}{" "}
               <b className="font-semibold text-amber-700 tabular-nums">{fmtMoney(pending.total)}</b>
             </>
+          ) : pending.count === null ? (
+            t("financeCockpit.truth.loadError")
           ) : (
             t("financeCockpit.work.pendingCardMetaEmpty")
           )}
@@ -349,19 +351,27 @@ export function PendingClaimsCard({ pending }: { pending: PendingTile }) {
         </div>
       )}
 
-      {/* 表(B-final DataTable 高密度樣式;容器收鍵盤事件) */}
+      {/* 表(B-final DataTable 高密度樣式;容器收鍵盤事件)
+          1A0a(Codex 7-18 P1-2):cached-stale(refetch 失敗但有快取列)保留舊列 +
+          stale badge,絕不用 cold loadError 蓋掉既有工作;只有無任何快取值(冷載
+          失敗)才整表換 loadError。 */}
       {list.isLoading ? (
         <div className="animate-pulse">
           {[...Array(4)].map((_, i) => (
             <div key={i} className="h-11 border-b border-gray-50 bg-gray-50/40 last:border-0" />
           ))}
         </div>
-      ) : list.isError ? (
+      ) : list.isError && list.data === undefined ? (
         <div className="px-4 py-8 text-center text-xs text-gray-400">
           {t("financeCockpit.truth.loadError")}
         </div>
       ) : items.length === 0 ? (
-        list.hasNextPage || list.isFetchingNextPage ? (
+        list.isError ? (
+          /* cached-empty + refetch 失敗 = stale,不得顯真空「待認領空了」 */
+          <div className="px-4 py-8 text-center text-xs text-amber-700">
+            {t("financeCockpit.truth.staleHint")}
+          </div>
+        ) : list.hasNextPage || list.isFetchingNextPage ? (
           /* 本頁清空但還有下一頁:自動翻頁進行中(上方 effect),顯示載入骨架
              而非空態 ——「待認領空了」只有真的無下一頁才說(回爐 P2 #2)。 */
           <div className="animate-pulse">
@@ -381,6 +391,12 @@ export function PendingClaimsCard({ pending }: { pending: PendingTile }) {
           onKeyDown={onTableKeyDown}
           className="overflow-x-auto outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-gray-300"
         >
+          {/* cached-nonempty + refetch 失敗:保留舊列並標 stale(Codex 7-18 P1-2) */}
+          {list.isError && (
+            <div className="px-4 py-1.5 text-[10px] text-amber-700">
+              {t("financeCockpit.truth.staleHint")}
+            </div>
+          )}
           <table className="w-full border-collapse text-xs">
             <thead className="border-b border-gray-200 bg-gray-50">
               <tr>
@@ -518,7 +534,7 @@ export function PendingClaimsCard({ pending }: { pending: PendingTile }) {
             {list.hasNextPage
               ? t("financeCockpit.work.loadedOf", {
                   loaded: String(items.length),
-                  total: String(Math.max(pending.count, items.length)),
+                  total: String(Math.max(pending.count ?? items.length, items.length)),
                 })
               : t("financeCockpit.work.allLoaded", { total: String(items.length) })}
           </span>

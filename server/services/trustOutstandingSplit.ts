@@ -67,7 +67,7 @@ export function laToday(now: Date = new Date()): string {
  *   - bookingId 空                          → unmatched
  *   - bookingId 有 + 認列日 <= 今天(LA)     → departedPending(出發了,可認列)
  *   - bookingId 有 + 認列日 > 今天 或 null   → matchedNotDeparted
- *     (認列日 null = recognizeReadyDepartures 還排不進認列,視為未到期)
+ *     (認列日 null = scanRecognitionDue 還排不進到期待審,視為未到期)
  */
 export function splitOutstandingTrust(
   rows: TrustSplitRowLike[],

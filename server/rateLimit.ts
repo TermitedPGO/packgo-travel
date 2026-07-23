@@ -66,6 +66,46 @@ export async function checkRateLimit(config: RateLimitConfig): Promise<RateLimit
 }
 
 /**
+ * Atomic fixed-window rate limit.
+ *
+ * checkRateLimit (above) reads the count and then writes in separate commands, so a
+ * concurrent burst can all read below the limit before any write lands and slip through
+ * together (TOCTOU). This variant runs INCR + a self-healing EXPIRE in ONE Lua script,
+ * which Redis executes atomically: N concurrent callers get N distinct counts, so only
+ * `limit` are ever allowed and no burst exceeds the cap. Doing the EXPIRE inside the
+ * script (whenever TTL is missing, not only on the first INCR) also closes the window
+ * where a lost EXPIRE would strand the key with TTL=-1 and block the IP forever.
+ *
+ * Skips in the test environment (same as checkRateLimit): there is no Redis in unit
+ * tests, so a test that fires N concurrent calls will see all N allowed. That is an
+ * artefact of the test harness, not a production gap — assert the throttle logic via a
+ * mocked Redis (see rateLimit.atomic.test.ts) instead.
+ */
+const ATOMIC_RL_LUA = `
+local c = redis.call('INCR', KEYS[1])
+local t = redis.call('TTL', KEYS[1])
+if t < 0 then
+  redis.call('EXPIRE', KEYS[1], ARGV[1])
+  t = tonumber(ARGV[1])
+end
+return {c, t}
+`;
+
+export async function checkAtomicRateLimit(config: RateLimitConfig): Promise<RateLimitResult> {
+  if (process.env.VITEST || process.env.NODE_ENV === "test") {
+    return { allowed: true, remaining: 999, resetAt: Date.now() + config.window * 1000 };
+  }
+  const { key, limit, window } = config;
+  const redisKey = `ratelimit:atomic:${key}`;
+  const [count, ttl] = (await redis.eval(ATOMIC_RL_LUA, 1, redisKey, String(window))) as [number, number];
+  const resetAt = Date.now() + (ttl > 0 ? ttl : window) * 1000;
+  if (count > limit) {
+    return { allowed: false, remaining: 0, resetAt };
+  }
+  return { allowed: true, remaining: limit - count, resetAt };
+}
+
+/**
  * Rate limit middleware for tour generation
  * Limit: 5 requests per hour per user
  */

@@ -17,6 +17,10 @@
 
 set -e
 
+# 1A0a(finance plan v4.3):mock 金額元件 grep gate — 非 /preview/ 的 MOCK_ 即擋
+echo "[pre-push] check-no-mock..."
+node scripts/check-no-mock.mjs
+
 echo "[pre-push] running full test suite (pnpm test)..."
 NODE_OPTIONS="--max-old-space-size=6144" pnpm test
 echo "[pre-push] ✓ tests green — push allowed"

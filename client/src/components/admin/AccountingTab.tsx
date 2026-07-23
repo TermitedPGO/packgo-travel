@@ -304,7 +304,9 @@ export default function AccountingTab() {
     limit: 100,
   });
   const pendingCountQuery = trpc.accounting.pendingExpenses.count.useQuery();
-  const pendingCount = pendingCountQuery.data?.pending ?? 0;
+  // 1A0a(Codex 7-18 R3):count 讀取失敗 ≠ 0 —— null 時 badge 顯「!」而非隱藏,
+  // 不把可行動的待確認佇列靜默藏掉(U1 error 折 0 反樣式)。
+  const pendingCount = pendingCountQuery.data?.pending ?? null;
 
   const [pendingDialog, setPendingDialog] = useState(false);
   const [confirmingId, setConfirmingId] = useState<number | null>(null);
@@ -520,6 +522,23 @@ export default function AccountingTab() {
         <Input type="date" value={dateRange.end} onChange={e => setDateRange(p => ({ ...p, end: e.target.value }))} className="w-40 h-8 text-sm rounded-lg" />
       </div>
 
+      {/* 1A0a:P&L 讀取失敗顯性(原本 pl 為 undefined 時整區靜默消失=假無事);
+          cached refetch 失敗 = stale 標記(Codex 7-18 P1-6) */}
+      {((plReport.isError && plReport.data === undefined) ||
+        (ytdReport.isError && ytdReport.data === undefined) ||
+        (plTrend.isError && plTrend.data === undefined)) && (
+        <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-xs text-amber-700">
+          {t("admin.accounting.plUnverifiable")}
+        </div>
+      )}
+      {((plReport.isError && plReport.data !== undefined) ||
+        (ytdReport.isError && ytdReport.data !== undefined) ||
+        (plTrend.isError && plTrend.data !== undefined)) && (
+        <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-xs text-amber-700">
+          {t("financeCockpit.truth.staleHint")}
+        </div>
+      )}
+
       {/* Stats Cards — from Plaid P&L */}
       {pl && (
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
@@ -570,11 +589,15 @@ export default function AccountingTab() {
           <TabsTrigger value="overview" className="rounded-md">{t("admin.accounting.tabOverview")}</TabsTrigger>
           <TabsTrigger value="pending" className="rounded-md flex items-center gap-1.5">
             {t("admin.accounting.pending.tab")}
-            {pendingCount > 0 && (
+            {/* 1A0a(Codex 7-18 P1-3):loading≠error≠zero。載入中不出徽章(未知,不畫 0
+                也不畫錯誤 !);cold-error 才顯 ! ;真數 >0 顯數字。 */}
+            {pendingCountQuery.isLoading ? null : pendingCountQuery.isError && pendingCount === null ? (
+              <span className="inline-flex items-center justify-center min-w-[1.25rem] h-5 px-1 rounded-full bg-amber-500 text-white text-[10px] font-semibold" title={t("admin.trustCompliance.loadFailed")}>!</span>
+            ) : pendingCount !== null && pendingCount > 0 ? (
               <span className="inline-flex items-center justify-center min-w-[1.25rem] h-5 px-1 rounded-full bg-amber-500 text-white text-[10px] font-semibold">
                 {pendingCount}
               </span>
-            )}
+            ) : null}
           </TabsTrigger>
           <TabsTrigger value="entries" className="rounded-md">{t("admin.accounting.tabEntries")}</TabsTrigger>
           <TabsTrigger value="invoices" className="rounded-md">{t("admin.accounting.tabInvoices")}</TabsTrigger>
@@ -589,8 +612,20 @@ export default function AccountingTab() {
               <h3 className="font-semibold text-gray-800 mb-3 flex items-center gap-2">
                 <BarChart3 className="h-4 w-4" /> {t("admin.accounting.monthlyTrend")}
               </h3>
-              {plTrend.data && plTrend.data.length > 0 ? (
+              {/* 1A0a(Codex 7-18 P1-3):loading / cold-error 不得畫成「沒有趨勢資料」 */}
+              {plTrend.isLoading ? (
+                <div className="animate-pulse space-y-2 py-2">{[0,1,2].map(i => <div key={i} className="h-5 rounded bg-gray-100" />)}</div>
+              ) : plTrend.isError && plTrend.data === undefined ? (
+                <p className="text-amber-700 text-sm py-4 text-center">{t("admin.trustCompliance.loadFailed")}</p>
+              ) : plTrend.isError && (plTrend.data?.length ?? 0) === 0 ? (
+                /* 1A0a(Codex 7-18 15:56 P1-2):cached-empty stale 不得落 clean
+                   「沒有趨勢資料」—— 空快取 + refetch 失敗 ≠ 可核實的真零 */
+                <p className="text-amber-700 text-sm py-4 text-center">{t("financeCockpit.truth.staleHint")}</p>
+              ) : plTrend.data && plTrend.data.length > 0 ? (
                 <div className="space-y-2">
+                  {plTrend.isError && (
+                    <p className="text-[10px] text-amber-700">{t("financeCockpit.truth.staleHint")}</p>
+                  )}
                   {plTrend.data.slice(-6).map(m => {
                     const maxIncome = Math.max(...plTrend.data!.map(x => x.income)) || 1;
                     return (
@@ -796,9 +831,16 @@ export default function AccountingTab() {
                     </td>
                   </tr>
                 ))}
-                {pendingQuery.data?.rows.length === 0 && (
+                {/* 1A0a R3:讀取失敗 ≠ 沒有待確認(cached-empty+error / 冷載都不得顯假空) */}
+                {pendingQuery.isLoading ? (
+                  <tr><td colSpan={6} className="px-4 py-8 text-center text-gray-300">{t("admin.accounting.loading")}</td></tr>
+                ) : pendingQuery.isError && pendingQuery.data === undefined ? (
+                  <tr><td colSpan={6} className="px-4 py-8 text-center text-amber-700">{t("admin.trustCompliance.loadFailed")}</td></tr>
+                ) : pendingQuery.isError ? (
+                  <tr><td colSpan={6} className="px-4 py-8 text-center text-amber-700">{t("financeCockpit.truth.staleHint")}</td></tr>
+                ) : pendingQuery.data?.rows.length === 0 ? (
                   <tr><td colSpan={6} className="px-4 py-8 text-center text-gray-400">{t("admin.accounting.pending.empty")}</td></tr>
-                )}
+                ) : null}
               </tbody>
             </table>
           </div>
@@ -876,9 +918,16 @@ export default function AccountingTab() {
                     </td>
                   </tr>
                 ))}
-                {entriesQuery.data?.entries.length === 0 && (
+                {/* 1A0a R3:讀取失敗 ≠ 沒有分錄 */}
+                {entriesQuery.isLoading ? (
+                  <tr><td colSpan={6} className="px-4 py-8 text-center text-gray-300">{t("admin.accounting.loading")}</td></tr>
+                ) : entriesQuery.isError && entriesQuery.data === undefined ? (
+                  <tr><td colSpan={6} className="px-4 py-8 text-center text-amber-700">{t("admin.trustCompliance.loadFailed")}</td></tr>
+                ) : entriesQuery.isError ? (
+                  <tr><td colSpan={6} className="px-4 py-8 text-center text-amber-700">{t("financeCockpit.truth.staleHint")}</td></tr>
+                ) : entriesQuery.data?.entries.length === 0 ? (
                   <tr><td colSpan={6} className="px-4 py-8 text-center text-gray-400">{t("admin.accounting.emptyEntries")}</td></tr>
-                )}
+                ) : null}
               </tbody>
             </table>
           </div>
@@ -937,9 +986,16 @@ export default function AccountingTab() {
                     </td>
                   </tr>
                 ))}
-                {(invoicesQuery.data?.length ?? 0) === 0 && (
+                {/* 1A0a R3:讀取失敗 ≠ 沒有發票(冷載 data===undefined 不得算 0) */}
+                {invoicesQuery.isLoading ? (
+                  <tr><td colSpan={6} className="px-4 py-8 text-center text-gray-300">{t("admin.accounting.loading")}</td></tr>
+                ) : invoicesQuery.isError && invoicesQuery.data === undefined ? (
+                  <tr><td colSpan={6} className="px-4 py-8 text-center text-amber-700">{t("admin.trustCompliance.loadFailed")}</td></tr>
+                ) : invoicesQuery.isError ? (
+                  <tr><td colSpan={6} className="px-4 py-8 text-center text-amber-700">{t("financeCockpit.truth.staleHint")}</td></tr>
+                ) : (invoicesQuery.data?.length ?? 0) === 0 ? (
                   <tr><td colSpan={6} className="px-4 py-8 text-center text-gray-400">{t("admin.accounting.emptyInvoices")}</td></tr>
-                )}
+                ) : null}
               </tbody>
             </table>
           </div>
@@ -990,9 +1046,16 @@ export default function AccountingTab() {
                 </div>
               );
             })}
-            {recurringQuery.data?.length === 0 && (
+            {/* 1A0a R3:讀取失敗 ≠ 沒有定期支出 */}
+            {recurringQuery.isLoading ? (
+              <div className="col-span-2 text-center py-8 text-gray-300">{t("admin.accounting.loading")}</div>
+            ) : recurringQuery.isError && recurringQuery.data === undefined ? (
+              <div className="col-span-2 text-center py-8 text-amber-700">{t("admin.trustCompliance.loadFailed")}</div>
+            ) : recurringQuery.isError ? (
+              <div className="col-span-2 text-center py-8 text-amber-700">{t("financeCockpit.truth.staleHint")}</div>
+            ) : recurringQuery.data?.length === 0 ? (
               <div className="col-span-2 text-center py-8 text-gray-400">{t("admin.accounting.emptyRecurring")}</div>
-            )}
+            ) : null}
           </div>
         </TabsContent>
       </Tabs>

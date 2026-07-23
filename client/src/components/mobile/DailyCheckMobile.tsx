@@ -19,6 +19,7 @@ import { Sparkles, ChevronRight, Clock } from "lucide-react";
 import { trpc } from "@/lib/trpc";
 import KpiStrip from "./KpiStrip";
 import { toast } from "sonner";
+import { useLocale } from "@/contexts/LocaleContext";
 
 const fmt = (n: number) =>
   `$${Math.round(n).toLocaleString("en-US")}`;
@@ -28,6 +29,7 @@ export default function DailyCheckMobile({
 }: {
   onNavigate: (page: string) => void;
 }) {
+  const { t } = useLocale();
   // Greeting based on hour
   const now = new Date();
   const hour = now.getHours();
@@ -73,9 +75,10 @@ export default function DailyCheckMobile({
       .slice(0, 5);
   }, [txns.data]);
 
-  const totalReviewPile = useMemo(() => {
-    const items = txns.data?.items ?? [];
-    return items.filter(
+  // 1A0a(Codex 7-18 P1-3):未取得(loading / 無快取 error)→ null,不算成真零 0。
+  const totalReviewPile = useMemo<number | null>(() => {
+    if (txns.data === undefined) return null;
+    return txns.data.items.filter(
       (t) =>
         (!t.agentCategory || t.agentCategory === "other_review") &&
         t.excludeFromAccounting === 0,
@@ -101,8 +104,21 @@ export default function DailyCheckMobile({
         />
       </div>
 
+      {/* 1A0a:交易讀取失敗不得靜默隱藏「需要你決定」(空 pile 假 all-clear);
+          cached refetch 失敗 = stale 同樣標示(Codex 7-18 P1-6/P2-3) */}
+      {txns.isError && txns.data === undefined && (
+        <div className="rounded-xl border border-amber-200 bg-amber-50 p-4 text-xs text-amber-700">
+          {t("mobile.reviewPileUnverifiable")}
+        </div>
+      )}
+      {txns.isError && txns.data !== undefined && (
+        <div className="rounded-xl border border-amber-200 bg-amber-50 p-4 text-xs text-amber-700">
+          {t("mobile.staleNotice")}
+        </div>
+      )}
+
       {/* 需要你決定 */}
-      {totalReviewPile > 0 && (
+      {totalReviewPile !== null && totalReviewPile > 0 && (
         <div className="rounded-xl border border-amber-200 bg-amber-50 p-4">
           <div className="flex items-center justify-between mb-2">
             <h2 className="text-sm font-semibold text-amber-900">
@@ -139,7 +155,7 @@ export default function DailyCheckMobile({
               );
             })}
           </ul>
-          {totalReviewPile > 5 && (
+          {totalReviewPile !== null && totalReviewPile > 5 && (
             <p className="text-[10px] text-amber-700 mt-2">
               …還有 {totalReviewPile - 5} 筆。點「全部」進入逐筆 swipe 分類。
             </p>
@@ -153,12 +169,20 @@ export default function DailyCheckMobile({
           <Clock className="w-4 h-4 text-gray-500" />
           最近 24 小時
         </h2>
+        {/* 1A0a(Codex 7-18 R3/P2-1):讀取失敗不得畫成「一切安靜」;cached-stale 保留
+            舊列 + badge,不整段丟棄。 */}
+        {activity.isError && activity.data !== undefined && (activity.data ?? []).length > 0 && (
+          <div className="mb-1 text-[10px] text-amber-700">{t("mobile.staleNotice")}</div>
+        )}
         {activity.isLoading ? (
-          <div className="text-xs text-gray-400 py-2">載入中…</div>
+          <div className="text-xs text-gray-400 py-2">{t("mobile.loading")}</div>
+        ) : activity.isError && activity.data === undefined ? (
+          <div className="text-xs text-amber-700 py-2">{t("mobile.activityUnverifiable")}</div>
+        ) : activity.isError && (activity.data ?? []).length === 0 ? (
+          /* cached-empty + refetch 失敗 = stale,不畫「一切安靜」 */
+          <div className="text-xs text-amber-700 py-2">{t("mobile.staleNotice")}</div>
         ) : (activity.data ?? []).length === 0 ? (
-          <div className="text-xs text-gray-400 py-2">
-            沒有新動靜 — agents + Plaid + Gmail 都安靜
-          </div>
+          <div className="text-xs text-gray-400 py-2">{t("mobile.activityEmpty")}</div>
         ) : (
           <ul className="space-y-2">
             {(activity.data ?? []).slice(0, 8).map((m: any) => {
@@ -197,19 +221,19 @@ export default function DailyCheckMobile({
             window.history.replaceState({}, "", u.toString());
             onNavigate("bank-ledger");
           }}
-          disabled={totalReviewPile === 0}
+          disabled={totalReviewPile === null || totalReviewPile === 0}
           className="rounded-xl border border-teal-200 bg-teal-50 text-teal-700 p-4 flex flex-col items-start gap-1 text-left active:scale-95 transition-transform disabled:opacity-50"
         >
           <Sparkles className="w-5 h-5" />
           <span className="text-sm font-semibold">逐筆 swipe 分類</span>
           <span className="text-[10px] opacity-70">
-            {totalReviewPile} 筆 · 滑動確認
+            {totalReviewPile === null ? "–" : totalReviewPile} 筆 · 滑動確認
           </span>
         </button>
         <button
           type="button"
           onClick={() => classifyMut.mutate({ limit: 50 })}
-          disabled={classifyMut.isPending || totalReviewPile === 0}
+          disabled={classifyMut.isPending || totalReviewPile === null || totalReviewPile === 0}
           className="rounded-xl border border-indigo-200 bg-indigo-50 text-indigo-700 p-4 flex flex-col items-start gap-1 text-left active:scale-95 transition-transform disabled:opacity-50"
         >
           <Sparkles className="w-5 h-5" />

@@ -33,6 +33,14 @@ COPY . .
 ARG GOOGLE_MAPS_BROWSER_KEY=""
 ENV VITE_GOOGLE_MAPS_BROWSER_KEY=$GOOGLE_MAPS_BROWSER_KEY
 
+# 1A0a boot telemetry(finance plan v4.3 §3.2.9):build marker git sha。
+# .dockerignore 排除 .git,remote build 內 `git rev-parse` 不可用 —— sha 一律由
+# safe-deploy.mjs 從已核准 HEAD 以 --build-arg 傳入(vite.config.ts 讀
+# process.env.GIT_SHA)。不傳時退 "unknown",clientBoot payload regex 會拒,
+# 換版證明鏈不會被假 sha 污染,但正式部署禁止走到這條路(safe-deploy 強制傳)。
+ARG GIT_SHA=""
+ENV GIT_SHA=$GIT_SHA
+
 RUN pnpm build
 
 # NOTE: we intentionally do NOT run `pnpm prune --prod` here.

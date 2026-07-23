@@ -19,7 +19,7 @@ import {
   DialogTrigger,
 } from "@/components/ui/dialog";
 import { toast } from "sonner";
-import { ExternalLink, TrendingUp, MousePointerClick, Plane, Hotel, BarChart3, Plus, Pencil, Trash2 } from "lucide-react";
+import { ExternalLink, Home, MousePointerClick, Plane, Hotel, BarChart3, Plus, Pencil, Trash2 } from "lucide-react";
 import { useLocale } from "@/contexts/LocaleContext";
 
 // ─── Stats Cards ─────────────────────────────────────────────────────────────
@@ -40,11 +40,15 @@ function StatsCards({ days }: { days: number }) {
     );
   }
 
+  // Phase 1 is homepage-only clickout, so trip_homepage is the live category;
+  // trip_flights / trip_hotels remain for pre-Phase-1 legacy rows. The old
+  // "top referrers" card was dropped: referrerPage now stores the closed source
+  // enum, not page paths.
   const cards = [
-    { label: t('admin.affiliateTab.statTotalClicks'),   value: stats?.totalClicks ?? 0,                       icon: MousePointerClick, color: "text-blue-600" },
-    { label: t('admin.affiliateTab.statFlightClicks'),  value: stats?.byPlatform?.trip_flights ?? 0,          icon: Plane,             color: "text-sky-600" },
-    { label: t('admin.affiliateTab.statHotelClicks'),   value: stats?.byPlatform?.trip_hotels ?? 0,           icon: Hotel,             color: "text-amber-600" },
-    { label: t('admin.affiliateTab.statTopReferrers'),  value: stats?.topReferrers?.length ?? 0,              icon: TrendingUp,        color: "text-green-600" },
+    { label: t('admin.affiliateTab.statTotalClicks'),    value: stats?.totalClicks ?? 0,               icon: MousePointerClick, color: "text-blue-600" },
+    { label: t('admin.affiliateTab.statHomepageClicks'), value: stats?.byPlatform?.trip_homepage ?? 0, icon: Home,              color: "text-green-600" },
+    { label: t('admin.affiliateTab.statFlightClicks'),   value: stats?.byPlatform?.trip_flights ?? 0,  icon: Plane,             color: "text-sky-600" },
+    { label: t('admin.affiliateTab.statHotelClicks'),    value: stats?.byPlatform?.trip_hotels ?? 0,   icon: Hotel,             color: "text-amber-600" },
   ];
 
   return (
@@ -85,6 +89,7 @@ function ClickLog() {
           onChange={e => setPlatform(e.target.value || undefined)}
         >
           <option value="">{t('admin.affiliateTab.allPlatforms')}</option>
+          <option value="trip_homepage">{t('admin.affiliateTab.platformHomepage')}</option>
           <option value="trip_flights">{t('admin.affiliateTab.platformFlights')}</option>
           <option value="trip_hotels">{t('admin.affiliateTab.platformHotels')}</option>
         </select>
@@ -111,12 +116,20 @@ function ClickLog() {
                     {new Date(click.createdAt).toLocaleString(localeArg)}
                   </TableCell>
                   <TableCell>
+                    {/* Three-way badge: a trip_homepage row must read as Homepage,
+                        never get mislabeled as Hotel by a binary fallback. */}
                     <span className={`text-xs font-medium px-2 py-1 rounded-full ${
                       click.platform === "trip_flights"
                         ? "bg-sky-100 text-sky-700"
-                        : "bg-amber-100 text-amber-700"
+                        : click.platform === "trip_hotels"
+                          ? "bg-amber-100 text-amber-700"
+                          : "bg-green-100 text-green-700"
                     }`}>
-                      {click.platform === "trip_flights" ? t('admin.affiliateTab.badgeFlights') : t('admin.affiliateTab.badgeHotels')}
+                      {click.platform === "trip_flights"
+                        ? t('admin.affiliateTab.badgeFlights')
+                        : click.platform === "trip_hotels"
+                          ? t('admin.affiliateTab.badgeHotels')
+                          : t('admin.affiliateTab.badgeHomepage')}
                     </span>
                   </TableCell>
                   <TableCell className="text-sm text-gray-600">{click.referrerPage || "-"}</TableCell>

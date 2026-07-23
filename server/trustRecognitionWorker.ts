@@ -9,10 +9,13 @@
  *                              the departure happened — those stay deferred
  *                              and surface in admin reconciliation)
  *
- * Marks them recognized so bankPLService stops subtracting them from income.
+ * B1 fail-closed (2026-07-12): the daily tick is a READ-ONLY scan. It NEVER
+ * writes recognizedAt — recognition is Jeff's money-move call, frozen until
+ * the CPA recognition matrix is approved. dueForReview rows only produce a
+ * review card (agentMessages) for Jeff to reconcile per-row later.
  *
- * Feature-flagged via PLAID_TRUST_DEFERRAL_ENABLED — when off, the worker
- * fires but recognizeReadyDepartures returns 0 immediately.
+ * Feature-flagged via the PLAID/STRIPE trust-deferral flags — when both off,
+ * the worker fires but scanRecognitionDue returns empty immediately.
  */
 
 import { Worker, Job } from "bullmq";
@@ -24,33 +27,38 @@ import type {
 import { notifyOwner } from "./_core/notification";
 import { wireWorkerFunnel, reportFunnelError } from "./_core/errorFunnel";
 
-export const trustRecognitionWorker = new Worker<
-  TrustRecognitionJobData,
-  TrustRecognitionJobResult
->(
-  "trust-recognition",
-  async (job: Job<TrustRecognitionJobData, TrustRecognitionJobResult>) => {
+/**
+ * The daily-cron job processor, extracted (B1.1, 2026-07-12) so an integration
+ * test can run the real funnel — transfer detection (mechanically forced
+ * dry-run) + scanRecognitionDue + review card — without constructing a BullMQ
+ * Worker or opening a Redis connection. Behavior is byte-identical to the
+ * previous inline processor.
+ */
+export async function processTrustRecognitionJob(
+  job: Job<TrustRecognitionJobData, TrustRecognitionJobResult>,
+): Promise<TrustRecognitionJobResult> {
     console.log(
       `[trustRecognitionWorker] starting run ${job.id} (triggered by: ${job.data.triggeredBy})`
     );
 
-    const { recognizeReadyDepartures, isAnyTrustDeferralEnabled } = await import(
-      "./services/trustDeferralService"
-    );
+    const { scanRecognitionDue, maybePostRecognitionDueCard, isAnyTrustDeferralEnabled } =
+      await import("./services/trustDeferralService");
 
     // F1 塊B (2026-07-08) 對抗審查 P1 修復:改用 isAnyTrustDeferralEnabled
-    // (PLAID flag OR STRIPE flag)——這支 worker 是 recognizeReadyDepartures
+    // (PLAID flag OR STRIPE flag)——這支 worker 是 scanRecognitionDue
     // 的唯一日常呼叫端,外層的 gate 若還只看 PLAID flag,即使函式本體已經
     // 修好,worker 還是會在 STRIPE-only 開啟時提早 return 不呼叫它。
-    // F2 塊B(2026-07-10):Trust→Operating 轉帳偵測 + 「認了沒轉錢」提醒,
-    // 搭每日認列 cron 的便車。刻意放在 flag gate 之前 —— 偵測對象是「已存在
-    // 的已認列列」(歷史事實,與當下 flag 開關無關),flag 全關時也要跑,
-    // 否則歷史認列列的轉出閉環永遠不會回填。runTrustTransferDetection 本體
-    // 絕不 throw(內部降級),不影響認列主流程。
+    // F2 塊B(2026-07-10):Trust→Operating 轉帳偵測,搭每日認列 cron 便車。
+    // B1.1(Codex 6.5 P0.1,2026-07-12):回填閉環暫停 —— 這裡硬帶 dryRun:true
+    // 作雙保險(服務內另有 isTrustTransferWriteApproved 機械閘,現硬回 false
+    // 亦強制 dry-run)。矩陣未核准前:不回填 transferredAt、不出催轉卡、不動錢。
+    // §17550.15(c) 無「會計已認列即可轉」;歷史 recognizedAt 可能來自舊出發日
+    // 規則,不得驅動 Jeff 動真錢。仍放 flag gate 之前(觀察對象是歷史列,與當下
+    // flag 無關)。runTrustTransferDetection 本體絕不 throw(內部降級)。
     const { runTrustTransferDetection } = await import(
       "./services/trustTransferDetection"
     );
-    const transferReport = await runTrustTransferDetection();
+    const transferReport = await runTrustTransferDetection({ dryRun: true });
     if (transferReport.backfilled > 0 || transferReport.overdueCount > 0) {
       console.log(
         `[trustRecognitionWorker] transfer detection: backfilled=${transferReport.backfilled} pairs=${transferReport.pairsFound} overdue=${transferReport.overdueCount} ($${transferReport.overdueTotal.toFixed(2)})`
@@ -64,33 +72,43 @@ export const trustRecognitionWorker = new Worker<
       return {
         runId: `disabled-${job.id}`,
         scanned: 0,
-        recognized: 0,
-        totalRecognizedAmount: 0,
+        dueForReview: 0,
         skippedNoDepartureDate: 0,
         skippedNotMatched: 0,
+        skippedCancelledBooking: 0,
       };
     }
 
-    const result = await recognizeReadyDepartures({
+    // B1 fail-closed:唯讀掃描,零 recognizedAt 寫入。到期款只列待審,不認列。
+    const result = await scanRecognitionDue({
       runId: `cron-${job.id}-${Date.now()}`,
     });
     console.log(
-      `[trustRecognitionWorker] ✅ run ${job.id}: scanned=${result.scanned} recognized=${result.recognized} amount=$${result.totalRecognizedAmount.toFixed(2)} skipNoDate=${result.skippedNoDepartureDate} skipNoMatch=${result.skippedNotMatched}`
+      `[trustRecognitionWorker] ✅ run ${job.id}: scanned=${result.scanned} dueForReview=${result.dueForReview} skipNoDate=${result.skippedNoDepartureDate} skipNoMatch=${result.skippedNotMatched} skipCancelled=${result.skippedCancelledBooking}`
     );
 
-    // Q5 operational reminder: every day, list today's departures + the
-    // amount in trust that Jeff manually needs to move trust → operating.
-    // This is the bridge between the accounting (which is now correct in
-    // the books via recognition) and the actual bank movement.
-    if (result.recognized > 0) {
+    // B1 fail-closed:到期待審 → 出一張 agentMessages 待審卡(同集合去重,照
+    // trustInvariantWatchdog 模式)+ notifyOwner 待審摘要。認列凍結,等 CPA
+    // 認列矩陣核准後由 Jeff 逐筆核 —— 文案只講到期待審,不再誤導成錢可轉出。
+    if (result.dueForReview > 0) {
+      const { getDb } = await import("./db");
+      const db = await getDb();
+      if (db) {
+        await maybePostRecognitionDueCard(db, result).catch((e) => {
+          reportFunnelError({
+            source: "fail-open:trustRecognitionWorker:dueCardFailed",
+            err: e,
+            context: { jobId: job.id ?? "?" },
+          }).catch(() => {});
+        });
+      }
+      const total = result.dueRows.reduce((s, r) => s + r.amount, 0);
       await notifyOwner({
-        title: `💰 信託收入認列 — $${result.totalRecognizedAmount.toFixed(2)} 該轉了`,
+        title: `📋 信託到期待審 — ${result.dueForReview} 筆 $${total.toFixed(2)} 等你逐筆核`,
         content:
-          `${result.recognized} 筆出發前已收的客戶款今天認列為收入,總額 $${result.totalRecognizedAmount.toFixed(2)}。\n\n` +
-          `📋 **今天該手動操作:**\n` +
-          `1. 從信託帳戶轉 **$${result.totalRecognizedAmount.toFixed(2)}** 到 operating 帳戶\n` +
-          `2. 銀行 app / 網銀內部轉帳即可,系統會在下次 Plaid sync 抓到\n\n` +
-          `本月 P&L 已經反映這筆 income(認列日 = 出發日)。`,
+          `${result.dueForReview} 筆舊規則審查日已到、已配對訂單的客戶款列為到期待審,總額 $${total.toFixed(2)}。\n\n` +
+          `審查日到不代表已出發、可認列或可從信託提領。系統不自動認列(認列是你的動錢權)。\n` +
+          `等 CPA 認列矩陣核准後,由你逐筆核。明細與去重狀態見駕駛艙的「到期待審」卡。`,
       });
     }
     if (result.skippedNotMatched > 5) {
@@ -105,30 +123,46 @@ export const trustRecognitionWorker = new Worker<
     }
 
     return result;
-  },
-  {
-    connection: redisBullMQ,
-    concurrency: 1,
-    lockDuration: 600_000, // 10 min
-    lockRenewTime: 180_000, // 3 min
-  }
-);
+}
+
+export const trustRecognitionWorker = new Worker<
+  TrustRecognitionJobData,
+  TrustRecognitionJobResult
+>("trust-recognition", processTrustRecognitionJob, {
+  connection: redisBullMQ,
+  concurrency: 1,
+  lockDuration: 600_000, // 10 min
+  lockRenewTime: 180_000, // 3 min
+});
 
 trustRecognitionWorker.on("completed", (job, result) => {
   console.log(
-    `[trustRecognitionWorker] ✅ ${job.id}: +${result.recognized} recognized`
+    `[trustRecognitionWorker] ✅ ${job.id}: ${result.dueForReview} due for review`
   );
 });
 
-trustRecognitionWorker.on("failed", (job, err) => {
+/**
+ * failed-listener 告警路徑,抽成具名函式以便單測(B1.1 P1.3:scanRecognitionDue 在
+ * DB 不可用時 throw → job reject → BullMQ 走 failed → 這裡發 notifyOwner 告警)。
+ * 行為與原本 inline listener 逐字相同(fire-and-forget notifyOwner + 失敗降級到
+ * errorFunnel)。回傳 Promise 純為可測;.on("failed") 仍不 await(BullMQ 慣例)。
+ */
+export async function handleTrustRecognitionJobFailed(
+  job: Job<TrustRecognitionJobData, TrustRecognitionJobResult> | undefined,
+  err: Error,
+): Promise<void> {
   console.error(`[trustRecognitionWorker] ❌ ${job?.id} failed:`, err.message);
-  notifyOwner({
+  await notifyOwner({
     title: `[trustRecognitionWorker] Job ${job?.id ?? "?"} failed`,
     content: `Error: ${err.message}\n\n${err.stack ?? "(no stack)"}`,
   }).catch((e) => {
     console.error("[notifyOwner] dispatch failed:", e);
     reportFunnelError({ source: "fail-open:trustRecognitionWorker:notifyOwnerFailed", err: e, context: { jobId: job?.id ?? "?" } }).catch(() => {});
   });
+}
+
+trustRecognitionWorker.on("failed", (job, err) => {
+  void handleTrustRecognitionJobFailed(job, err);
 });
 
 wireWorkerFunnel(trustRecognitionWorker, "trust-recognition");

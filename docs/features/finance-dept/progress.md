@@ -1223,3 +1223,323 @@ customOrders square 覆蓋;或走查 dry-run 候選命中率。
 - fold byte-identical 測試為「自比對」(同版本兩參數 vs 三參數輸出相等),
   非跨版本 golden file —— 防「新參數預設值改行為」,不防「共同路徑被改」;
   後者由全套既有 fold 數字測試覆蓋。
+
+## 財報區 Phase 0(2026-07-17,docs-only,依 Codex 12:22 固定施工單)
+
+**狀態:docs 施工完成,未 commit,交 Codex 實質複核。**
+
+隔離:worktree /Users/jeff/dev/網站-finance-docs,branch finance-truth-contract-docs,base origin/main@4e9199d0(獨佔核實:路徑/分支原不存在、無 git lock);主工作樹 WIP 零觸碰;proposal 搬入前後 SHA-256 一致(a5c7e103...)。
+
+交付(固定四檔):
+1. number-contract-trust-first-20260717.md(新增)— 四層標籤(A/B/C/D,只有 B 進 closed/tax truth)、共同欄位契約(LA 邊界/currency USD-only fail-closed/逐來源 as-of/coverage/十態列舉/排除理由/drill-down/closed 資格)、14 指標逐項定義、$10,000/$8,000/$2,000 gross vs net 示例、既有結構映射。
+2. design-trust-first-finance-reporting-20260717.md(新增)— FinanceCockpit 為骨架、六區 canonical IA、總覽固定順序、卡片十態狀態機(error≠zero≠empty)、Invoice/AP 契約(received→needs_review→approved→due→partially_paid→paid+disputed/void,paid 只由 allocation 推導)、Trust 出帳五要素、§六八項資料真值風險(八路唯讀核實全成立,附錨點,全部標 explicitly not fixed in Phase 0)、§七權限與 AI 邊界。
+3. proposal-trust-hard-boundary-20260717.md(一致性收斂)— 加註 Codex 拍板六條;問題包 B 補 B-7 principal/agent 產品矩陣。
+4. 本檔(追加本段)。
+
+八項風險核實結論(細節與錨點見 design §六):①/ops MOCK_FINANCE 假數無標示 ②bankPL trust lookup fail-open 退 gross ③currency 盲加標 USD ④頁級 as-of 掩蓋過期 ⑤error 缺省 0 假 all-clear(WorkColumn 綠勾) ⑥雙計零 DB 約束+yearEndExport 排除清單已漂移 ⑦supplier AP ledger 不存在+「可動用」未扣應付 ⑧三 CPA 出口 fold 未收斂(ZIP 獨立路+trend 複本+userId 範圍相反)。全部 Phase 0 不修,標 future gate 供 Phase 1 施工單。
+
+未解凍證明:本輪零 code/schema/migration/prod/commit;trustTransferWriteGate 硬 false、認列零寫入者、端點 403 原樣(base 4e9199d0 親核,見 AI交流/Claude/2026-07-17.md)。
+
+### Phase 0 返工(2026-07-17,依 Codex 13:04 複核 FAIL:P0 1/P1 8/P2 2)
+
+**狀態:返工完成,未 commit,交 Codex 契約一致性終驗。**(上段「施工完成」為 13:04 前狀態語言,依複核更正為 FAIL 後返工;不改寫上段歷史。)
+
+逐項核銷:
+- P0:number-contract v2 —— Customer funds liability 拆成槽 3a(Accounting contract liability,CPA 軸)與槽 3b(Trust required reserve,律師軸,not-computable/RC-LAW);Trust coverage 減項只認律師矩陣 required reserve,矩陣未定 not-computable;−$10,442 降格為 2026-07-11 snapshot 的 proxy 口徑 historical operational drift;四軸互不推導入契約總則;$10k/$8k/$2k 示例重寫為事件時間線分軸表,未定格顯示 reasonCode 不補猜。
+- P1-1:A/B/C/D 改為輸入 provenance;衍生指標帶 componentLineage/assurance(min 規則)/closedEligible 與 taxEligible 分欄;trust proxy 標 unverified operational proxy 禁入 closed/tax。
+- P1-2:18 列(原 14 槽)KPI 矩陣逐欄填值,unresolved 附 reasonCode 註冊表;狀態模型改四正交軸(dataStatus/completeness/freshness/periodStatus)+ primary state 解析序(原十態互斥為 12:22 施工單原設計,Codex 自承需更正)。
+- P1-3:拆 Gross Bookings(not-computable/RC-EVENT)、Company Compensation、Recognized Revenue、COGS、Gross Profit;Take Rate 分子固定 Company Compensation;「永不進 P&L」改「不得自動進 revenue」。
+- P1-4:Operating liquidity 用 available(null fallback+quality);Trust 對帳用 current/posted;欄名更正 lastSyncedAt;07-11 數字全標 historical snapshot。
+- P1-5:Invoice/AP 改三正交軸(document/due/payment)+最低 guard 集(防重/幣別一致/正數 allocation/不得無聲超額/idempotency/銀行交易 identity/已付只准 adjustment);Trust-eligible 落到逐筆 allocation。
+- P1-6:design 新增 §五A 經濟事件同一性圖(payout=settlement 非二次 sale;五態歸屬;unmatched=abs−Σallocations;DB constraint 前禁兩本帳合加進 closed truth;watchdog 僅 detection);槽 10 Operating Expenses 排除集合明列。
+- P1-7:design §一 拓撲更正(/workspace reports tab 掛 FinanceCockpit,WorkspaceCompany.tsx:80 親核);proposal §5.2 claim 流三缺口改已閉合歷史(batchClaim bankTransactionLinks.ts:332 親核);「法規判讀已完成」改「內部法規問題盤點(非法律意見)」;「只調參數不動結構」改 target 非保證;evidence 清單補 compensation;移除「遞延→認列→核准→轉出」單一路徑改四軸;design /close 標 future/not-configured。
+- P1-8(越界更正):主工作樹 STATE.md 的 finance Phase 0 句已精確刪除(前後 git diff 存檔比對,僅該一行消失、其餘 hunks byte-identical,diff 證據:scratchpad state-diff-before/after.txt);proposal §六 重寫(問題包/gate 獨立檔=backlog 未授權新檔;STATE/journal 不在固定範圍);真值:**本輪曾越界寫入 STATE.md 一句,已依裁定精確復原**。
+- P2-1:design §八A 最小 month-close 契約(open→closing→closed→reopened,close snapshot/coverage gate/Jeff re-auth/append-only reopen;CPA export 於 fold 收斂前 not-configured)。
+- P2-2:number-contract §三金額契約(USD integer minor units 目標/DECIMAL 現況/禁 parseFloat 流水線/sum-before-round/方向欄位/reversal 列/對帳到 1 cent 不變量)。
+
+### Phase 0 返工二(2026-07-17,依 Codex 13:42 終驗 FAIL:P0 1/P1 6/P2 3,固定最後窄修)
+
+**狀態:返工二完成,未 commit,交 Codex 機械+兩條會計時間線終驗。**
+
+先更正前段兩個過度宣稱(追加不改寫):①前段「18 列逐欄 15 項無空白」宣稱不成立——槽 4/8b/8c/8d/9/11/12 當時用「同槽/繼承」代替逐欄,13:42 P1-1 點名;v3 已逐列 15 欄寫全,不知道填 N/A 或 not-computable+reasonCode。②前段引用的 diff 證據路徑「scratchpad state-diff-before/after.txt」未寫完整路徑——實際位置是 session scratchpad `/private/tmp/claude-501/-Users-jeff-dev---/cac1d3dd-08d2-49ef-8a2a-a79852fce0e2/scratchpad/`(兩檔存在,13:15 mtime,非 /Users/jeff 下,session 暫存非 durable);durable 確認以 Codex 13:42 §一機械重驗為準(STATE diff 34/14→33/14,恰少一行)。
+
+逐項核銷:
+- P0:槽 3a 公式改「CPA 核准之 transaction price allocated to unsatisfied performance obligations − 已履約認列 − 核准 credit/refund」,不以全部現金當共同 base;supplier payable/pass-through 明列為獨立負債(槽 7 擴充定義),付供應商只清 pass-through 不清 contract liability;proxy 排除集合修正為只排 recognizedAt/reversedAt(**不排 transferredAt**,canonical query plaidRouter.ts:1894-1908 親核同款),正式值標 not-computable/RC-CPA 不寫說謊數字;示例重寫為 agent 與 principal 兩張完整時間線(T0-T3,八/九欄各軸分列,終態全部負債歸零,銀行轉出不出現在任何負債解除邏輯);稅務軸補最小契約(event/金額/期間/as-of,現況 not-computable/RC-CPA,不默認帳面=稅務)。
+- P1-1:18 列逐列 15 欄寫全零繼承;assurance 另立有序 enum(posted-fact>jeff-approved>operational>suggested>unverified-proxy),provenance 與刻度分離,合成=取最低。
+- P1-2:槽 8a 正式 KPI 降 not-computable(RC-EVENT+RC-AP);現況代理改名 Raw quoted-margin proxy,只納 price 與 supplierCost 皆 non-null 單,缺成本單列筆數/金額,coverage 分子分母明定。
+- P1-3:design §五A 補完整 edge/cardinality/unique key 表(七條關係+重放冪等鍵)+canonical rail 裁定(bankTransactions=落地 rail;accountingEntries=投影)+**關帳閘機械拒絕**(constraint 未建或存在未豁免 unresolved 即拒 close,watchdog 僅 detection)。
+- P1-4:槽 10 排除集合補 cogs_other(bankPLService.ts:62-69 親核 COGS 全集)、金額公式與分類 coverage 拆開、分母=eligible operating outflows(排除集合為有理由 exclusion 非缺口);槽 14 重寫:raw operational remaining 與 Jeff-verified close-eligible remaining 分列、valid allocation 定義、claimedBy 分層(jeff/system)、超額分配=error、resolution status 與 match method 分軸、inflow+outflow 同口徑、completeness 改 partial(RC-DEDUP/RC-MATCH 未閉)。
+- P1-5:AP 數學閉合:rawRemaining=total−net allocations、remainingDue=max(0,rawRemaining)、overpaidAmount=max(0,−rawRemaining)、reversal 方向明定;disputed 另列 exposure 不靜默消失,總覽並列 undisputed due 與 disputed exposure(design §四+槽 7)。
+- P1-6:B-2(§17550 適用性)移律師包成 A-9,CPA B-2 改法律分類後的會計/稅務後果;「憑證交付證明」降為 supporting evidence,明文不能單獨建立 withdrawal eligibility,正式 evidence type 屬 RC-LAW。
+- P2-1:design 舊欄名 lastSync→lastSyncedAt(schema.ts:3144)、IA 表舊槽號全改 18 列槽名、狀態軸示例 partial+overdue→partial+stale(overdue 標明為 AP due 子域 badge)。
+- P2-2:數字契約「現況」欄全改「base 4e9199d0 結構可讀;runtime 未探測」口徑,槽 2 帳戶數標 07-11 snapshot;proposal「今日餘額」改 2026-07-11 snapshot。
+- P2-3:evidence path 更正(見本段開頭)。
+
+### Phase 0 收尾(2026-07-17,依 Codex 14:17 最後機械終驗:核心契約 PASS,P1 2/P2 3)
+
+**狀態:收尾完成,未 commit,交 Codex 五項 exact check;吻合即取得本地 commit 資格。**
+
+先追加一項更正:14:02 段「舊槽號全改/grep 歸零」當時尚差 design 一處「數字契約 3.11」(14:17 P2-3 點名),本輪已改「數字契約槽 11」;不改寫歷史。
+
+逐項核銷:
+- P1-1:兩條時間線 T1 的 $8,000 雙顯修正 —— supplier payable 總帳與 approved AP 合併為單欄(AP 為 memo/subledger 標註,不得相加),新增「負債合計(總帳,AP 子帳不重計)」欄逐時點機械核加總(agent:10,000→10,000→2,000→0;principal:10,000→18,000→10,000→0,T1 18,000 為對客戶+對供應商兩個不同對象的義務,借方另有遞延成本資產,非重複計);兩表共用不變量句入檔。
+- P1-2:槽 14 Jeff-verified close-eligible remaining 降為 **target/not-configured + RC-DEDUP** —— base 4e9199d0 bankTransactionLinks 無 reversedAt 欄、unlink 直接 DELETE(bankTransactionLinks.ts:394-396 親核),此口徑今天無法由所列來源重建;raw 口徑依現存 link 可算(ready/partial);未來 source=append-only allocation reversal 列/表;audit log 不得冒充 money truth;④⑪⑫ 兩口徑分列。
+- P2-1:design §四 payment 軸改逐字 canonical 三式(rawRemaining/remainingDue/overpaidAmount)+disputed obligation 不消失、另列 exposure、與 undisputed due 並列。
+- P2-2:槽 10 ⑨「如 ③ 排除集合」改「前述排除集合」;機械 guard 升級為每槽 ①-⑮ **各恰一次**(腳本核數:18 槽零違規)。
+- P2-3:design「數字契約 3.11」→「數字契約槽 11」,舊錨點 grep 歸零。
+
+驗收:兩時間線每時點負債加總不重複(合計欄機械可核);raw/Jeff-verified 能力分級真實;18 槽 marker 各恰一次;舊 AP 式與舊 3.11 錨點零命中;固定四檔 staged 0、diff --check 乾淨、零 trailing whitespace。proposal/STATE/code/信託閘全程未動。
+
+**閉環(2026-07-17 15:20 PDT)**:Codex 15:12 五項 exact check 全 PASS(P0/P1/P2 歸零,授本地 commit 資格)後,依「green 即 commit」授權本地提交:commit `8624880b`(固定四檔,+480)。狀態=**已提交、未 push、未 merge、未 deploy;Phase 1 production code 未授權**。磁碟警告核實:實測 /System/Volumes/Data 46 GiB 可用,1.4 GiB 警告與現況不符,未阻塞。STATE.md 維持凍結未動(P1-8 裁定後未獲解凍),批次真值以本檔+AI交流為準。
+
+## Phase 0 合併閉環+Phase 1 施工前設計(2026-07-17,新 session)
+
+**Phase 0 合併(Jeff 明確裁「准 push/merge Phase0」後執行)**:
+
+- push 前機械核對全過:worktree clean/staged 0/父鏈筆直(8624880b←4e9199d0、2b15ae35←8624880b)/範圍固定四檔 482 insertions/遠端無 branch/未 merge;fetch 後 origin/main 仍 4e9199d0 零漂移。
+- push finance-truth-contract-docs → PR #5(逐檔核對只含固定四檔、恰兩 commit)→ repo 無任何啟用 workflow、無 branch protection、head commit check-runs=0(「必要 checks」為空集合,與 PR #4 先例同;未用 --no-verify/force push)→ merge commit 方式併入 main。
+- 合併證明:merge commit `fef3bdbc`(parents=4e9199d0+2b15ae35,2026-07-17 23:28 UTC);fetch 後 origin/main=fef3bdbc,兩 commit 皆 is-ancestor;`git diff 2b15ae35 origin/main`=0 行,tree hash 相同(5c7fb9ec),內容 byte-identical。未 deploy。
+
+**Phase 1 施工前設計(plan-only)**:
+
+- 隔離 worktree 網站-finance-phase1,branch finance-reporting-phase1-plan,base origin/main@fef3bdbc,全新自最新 main,主工作樹 WIP 零觸碰。
+- 三路唯讀盤點(前端 UI/後端服務/AP+trust 資料流,行號皆 fef3bdbc 實測)+指揮親核七個承重錨點:bankPLService.ts:226-232 fail-open「returning gross」、yearEndExportService.ts:211-213 排除清單漏 payout、trustTransferWriteGate.ts:18-20 硬 false、bankTransactionLinks.ts:394-396 unlink 硬 DELETE、AdminHome.tsx:34 MOCK_FINANCE、WorkColumn.tsx:28 allClear 不查 isError、yearEndExport parseFloat 直加。
+- 新發現(Phase 0 §六以外):financialReportService 是第二套平行 P&L(accountingEntries 系,基礎資料源與 bankPL 完全不同);claim 寫入無 idempotency key;全 server 零 re-auth 機制;月結結構零命中;overpaid 概念零命中;invoices(客戶側)status 無 partial。
+- 交付:phase-1-implementation-plan-20260717.md —— current-state evidence(§一,親核/盤點分標)、canonical financeTruthService 邊界(§二)、1A fail-closed 封套/1B 三出口收斂/1C AP tracer 切分+各批固定檔案清單(§三)、API/UI 封套 contract(§四)、fail-closed 精確語意(§五)、AP 三軸+canonical 三式(§六)、權限 audit contract(§七)、測試矩陣(§八)、migration 1A/1B 零、1C additive-only 兩表(§九)、rollback/flag(§十)、禁動清單(§十一)、矩陣待裁不阻塞聲明(§十二)、九項風險逐項反駁(§十三)、七項交 Codex 裁定(§十四)。
+- 狀態:**plan 完成,未 commit、未 push;零 production code/schema/migration/Trust gate/STATE 觸碰。交 Codex 實質複核與固定施工批裁定。**
+
+### Phase 1 plan 返工(2026-07-17,依 Codex 17:28 實質複核 FAIL:P0 3/P1 9/P2 4)
+
+**狀態:plan v2 重寫完成,未 commit,交 Codex 契約與可施工性終驗。**(上段「plan 完成」為 17:28 前狀態語言,依複核更正為 FAIL 後返工;不改寫歷史。)
+
+Codex 確認保留面:Phase 0 合併閉環 PASS、Phase 1 隔離 PASS、現況盤點大方向屬實。只退 plan 本體。
+
+逐項核銷(對應 Codex 十條 exit criteria):
+- P0-1(flag 復活假數):安全語意重裁 —— 所有 flag OFF=unavailable(not-configured envelope+匯出停用),永不回 fail-open;1A0 移除與封鎖不掛 flag;envelope 帶 contractVersion,禁 unversioned dual shape;rollback runbook 明寫 Fly redeploy 非即時+恢復時間。
+- P0-2(強迫三出口同數違反稅務軸):改為共用 NormalizedFinancePeriod population,不強迫 management=tax;tax projection CPA 前恆 not-computable+RC-CPA(taxCsv 1A0 起停用不解封);年終匯出改名 bank-evidence-export(原始證據,非 CPA-ready),與未來 CPA-ready export 分開。
+- P0-3(同筆銀行付款重複清多張 invoice):allocation guard 補 bank 端全域容量 Σ net allocations per bankTransactionId ≤ abs(outflow),同一 DB transaction+FOR UPDATE 鎖+posted+Operating-only+USD 檢查。
+- P1-1(Module 定位矛盾):裁定 financeTruthService 為深 Module 擁有算數(fold 遷入,bankPL thin wrapper 化終至退役);source Adapters(typed error)/output Adapters(management/tax/rawEvidence 只投影)分層;financialReportService 1A0 封鎖報表面+CRUD 保留,終局列裁定。
+- P1-2(envelope 未兌現契約):逐欄 TypeScript 重寫(freshness/periodStatus/componentLineage/closedEligible/taxEligible/unit/drillDown/unsupportedBuckets/coverage 結構化/SourceName+ReasonCode enum);合法狀態矩陣+payload 範例;三層錯誤邊界(source throw/module 捕捉/tRPC 只為 auth-input-contract throw);client query-state Adapter useFinanceMetric。
+- P1-3(caller matrix 不全):返工輪親核 grep 全庫 —— generateBankPL/trend 九個 server callers(含 financeAdvisor/opsTools/financeAlertProducer/taxAggregates)、financeKpi 七個 client consumers(含 mobile KpiStrip :46-51 六個 ?? 0、DailyCheckMobile、BankTriagePage)、LedgerTrust/AccountingTab/TrustCard/BankLedgerV2 全列入固定清單。
+- P1-4(1A/1B 過渡窗):重切六批 1A0 stop-the-bleed(同批封鎖 fail-open export+第二套 P&L+全部 if(!db) 守門+mock 移除)→1A1 單 metric 完整 tracer→1B normalized+三 adapters→1C0 recent-auth+transactional financeEvents 基建→1C1 AP read/ingest→1C2 approval/allocation。
+- P1-5(scope/currency 未落地):accounting entity=PACK&GO 單一公司,scope=isActive=1 全帳戶跨 userId+envelope 列舉 accountIds;currency unknown 前向寫 sentinel XXX(varchar(3) 相容零 migration),歷史 fallback 不可區分如實承認+三層緩解+CPA 揭露。
+- P1-6(AP 兩表不足):改三表+事實帳 —— supplierInvoiceEvents(append-only 真相)/supplierInvoices(投影)/supplierInvoiceLines(order 綁定 line 層 N:M,cardinality 裁定+設計稿修訂需求登記);reversal guard 全集(同 invoice/Σ≤原額/不可再 reverse)。
+- P1-7(Trust 繞道+USD 未守):allocation 硬拒 isTrustAccount=1、硬限雙邊 USD;法定提領類型 not-configured+RC-LAW。
+- P1-8(Owner/AI/audit 未機械成立):1C0 前置不降級 —— reAuthGrants(密碼重驗簽發、單次、TTL、actionScope 綁定,AI 機械上不可能取得)+financeEvents 與 money write 同交易、insert 失敗全 rollback;adminAuditLog 降二級 observability(親核其 fire-and-forget 慣例 auditLog.ts:19/:305)。
+- P1-9+P2(路徑/測試):i18n 路徑更正 client/src/i18n;固定清單補 featureFlags.ts/server/routers.ts(:209,:292 親核)/drizzle/meta/_journal.json/auth 接線;monthKeyOfDate 親核為 trustDeferralService.ts:1359 私有未 export,1B 抽出;測試矩陣補 flag OFF 斷言不出 legacy 數字、容器 DB 實跑 constraint、200-way 併發 allocation、audit 失敗 rollback、golden 以 NormalizedFinancePeriod 為共同 shape(P2-3);槽 7 誠實口徑 approved-AP 子面 only(P2-1);invoice 防重 canonicalInvoiceNumber NOT NULL+normalization+documentHash fallback(P2-2);flag 非即時 rollback runbook(P2-4)。
+- 返工輪新增親核錨點:taxCsvService.ts:229-232「using zeros」照樣產 CSV(F6)、auditLog fire-and-forget(F7)、accounting.ts:42 import financialReportService live、KpiStrip :46-51、routers.ts :209/:292。
+
+範圍:只改 plan 檔+本段追加;零新 repo 檔案;Phase 0 四檔/STATE/code/schema/migration/Trust gate 零觸碰;未 commit、未 push。
+
+### Phase 1 plan v3 最後返工(2026-07-17,依 Codex 18:21 終驗 FAIL:P0 1/P1 10/P2 3,方向通過、固定接線未閉)
+
+**狀態:plan v3 完成,未 commit,交 Codex 十二項 exact check。**
+
+先追加更正(P2-3,不改寫歷史):前段(18:05 輪)「十條 exit criteria 逐項落實」「caller graph 全修正」為過度宣稱——Codex 機械核對抓出 caller graph 直讀/invalidator/comment-only 混列(v2「9 callers/7 consumers」表作廢)、1A0 漏 commandCenter.downloadTaxCsv/askFinanceAdvisor、opsActions 稅表 tool、accounting 四報表 procedures、auditExclusionList 假空清單等正式入口。真值=v2 方向通過、固定接線未閉。
+
+十二項 exact criteria 逐項核銷(全部新錨點指揮親跑 rg 實測):
+1. 1A0 exact entrypoint/consumer matrix:E1-E9 封鎖面總表(yearEndExport/downloadTaxCsv:693-703/askFinanceAdvisor:678-685/opsActions doDownloadTaxCsv:636-657/accounting dashboard:147+profitAndLoss:160+monthlyTrend:170+taxSummary:177/auditExclusionList 假空:2141-2156)+健康來源黑箱驗收逐入口實呼;procedure→live readers 完整配對表(11 procedures 逐檔行號,uncategorizedGroups/accountingLegacyOverrideAudit 親核 client 零直讀)。
+2. 五類 caller graph 重畫:financeKpi 直讀僅 useCockpitData:27+KpiStrip:44,四個 invalidator(RecognitionCard:35/BankLedgerV2:311,624/DailyCheckMobile:56/BankTriagePage:68),PLCard comment-only(實讀 profitLossReport:42 需 byCategory,不得硬接 KPI);generateBankPL 真 caller 五檔(plaidRouter/financeAlertProducer/financeAdvisor/opsTools/taxCsvService 逐行號),trustDeferralService:1292,1368+taxAggregates:6+financialReportService:184 判 comment-only。
+3. 深 Module 可施工契約:五個 Interface 完整 TS signatures(FinanceSourceAdapter+SourceError typed kinds/FinanceTruthService/Management/Tax/RawEvidence adapters)、實作檔路徑、constructor 注入 seam、bankPLService thin-wrapper 終止條件寫死(rg 歸零即同批刪除);financialReportService 本輪唯一終局裁定=永久錄入-only(四報表 procedures 1A0 封鎖、1B 刪除計算函式與 financeAdvisor 兩處 import,保留 exact live routes :46-:306 錄入面)。
+4. company scope=FINANCE_OPERATING_ACCOUNT_MASKS 白名單(沿 trustTransferDetection.ts:85 先例)+isTrustAccount 集合,active 帳戶不屬任一集合即全域 scope-violation fail-closed;currency 八處全鏈 inventory(plaidSyncService:98,164/plaidRouter:212,496/plaidWebhook:397/bankCsvImportService:45,151 裁「來源證明 USD」留用/accountingAgentService:225 與 trustDeferralService:423 讀取層 fallback 判死碼刪除)。
+5. financeKpiV1:closed MetricId 六個列舉、MetricBatchV1 單次 batched response、舊 financeKpi fail-closed 至退役(連續 7 天零命中才刪)、rollout runbook+unknown contractVersion 測試。
+6. envelope 新增四條 invariants(true-zero⇒value===0/unsupported⇒非空幣別桶/partial⇒gapReason/error 類⇒operationalReason);operationalReason 新欄五碼(OP-*)與 SourceError 一一映射,不動 Phase 0 reasonCode 註冊表,v2 以 RC-FROZEN 表達查詢失敗之誤用更正;client Adapter 語意(isError+cached=stale envelope/background fetch 不遮值/allClear 公式寫死);/ops 清全部五個 MOCK_(:17,:26,:34,:36,:38),非只財務三個。
+7. allocation 第四表自 1C1 移出,獨立 1C2 migration 批(0119_supplier_ap_allocations,exact DDL 欄位+journal+snapshot 列明);1C0=0117、1C1=0118。
+8. recent-auth 原子消費(同交易條件 UPDATE affectedRows===1)+domain event→financeEvents→投影同交易全 rollback;人身驗證形式本輪裁定=密碼重驗(親核 server/auth.ts bcrypt+routers/auth.ts login:95,非 Google-only);auth exact paths+ReAuthDialog 固定檔;supplierInvoiceEvents=AP domain truth 與 financeEvents=control spine 以 NOT NULL UNIQUE FK 1:1 機械綁定。
+9. AP 三軸 transition matrix(disputed 不在 payment 軸,凍結 allocation 效果)、投影 version+FOR UPDATE 鎖、replay determinism property test、reversal bankTransactionId server 繼承(caller 型別上不可指定)、excludeFromAccounting=1 硬拒、lines constraints(UNIQUE(invoiceId,lineNo)/正數/customOrderId XOR bookingId/Σ≤total+顯性 unassignedRemainder)、DB 黑箱競態矩陣。
+10. 固定清單全改真實路徑:client/src/i18n/{zh-TW,en}.ts 更正、.husky/pre-push+scripts/check-no-mock.mjs、component seam=renderToStaticMarkup+jsdom 現有慣例(親核 repo 無 MSW/Testing Library,先例 customerRowLayout.test.ts)、scripts/test-db/{docker-compose.yml,run-integration.sh}+prod 連線拒跑守門、routers.ts 固定 mount 非條件式、1C 各批含 featureFlags.ts。
+11. 1C1 前置獨立 docs-only 批 1C-docs:設計稿 §5A.2 N:M 修訂+invoice normalization v1 版本化規格(NFKC/uppercase/去分隔/空值 HASH fallback/normVersion 隨列存/golden cases),不准先造 schema 再改契約。
+12. 本段+通信+索引追加「v2 方向通過、固定接線未閉」誠實更正。
+
+範圍:只改 plan+本段追加;零新 repo 檔案;凍結面零觸碰;未 commit、未 push。交 Codex 十二項 exact check;全過只授 1A0 施工資格。
+
+### Phase 1 plan consolidated v4(2026-07-17,依 Codex 19:13 exact check FAIL:P0 2/P1 6/P2 2,九項差額返工)
+
+**狀態:v4 完成,未 commit,交 Codex 只核九項差額。**
+
+先追加更正(Codex P2-2,不改寫歷史):18:55 回報與索引「十二項 exact criteria 逐項閉合」不成立——**v3 exact check FAIL:P0 2/P1 6/P2 2**。機械反例:1A0 漏 TaxDetail 稅務區(來源健康仍渲染 Schedule C :456-539 與 1099 :630-670)與 ops agent 兩 action 全鏈;「舊 bundle 有既有 error UI」假設被 KpiStrip 七個 `?? 0`(:46-52,含 ytd.netProfit :52)與 serviceWorker silent 更新(:37-50)實測推翻;v3 引用已被覆寫不存在的 v2 內容;E6-E9 caller 寫錯(AccountingTab 實讀 plaid,accounting 四報表 client 直讀 rg 零);`.test.tsx` 不被 vitest 收集(vitest.config.ts:18-23)。
+
+九項差額逐項核銷(新錨點全部指揮親跑):
+1. 封鎖鏈補齊:E-matrix 十二項(E1-E12)——補 TaxDetail 稅務區 client 撤除+vendor1099List(:2240)封鎖、ops agent downloadTaxCsv/askFinanceAdvisor 全鏈(opsActions.ts:38-41/:176-181/:576-581/:636-657+opsAgent.ts:416-418/:578/:626-641+opsAgentStream.ts:121-124)proposal/schema/executor/underlying service 四層、taxCsvService 函式頭 throw 縱深;E6-E9 真 caller 更正(client 直讀 0);mobile readers(DailyCheckMobile:47/BankTriagePage:60)補入配對表;每入口各自黑箱預期(tRPC=PRECONDITION_FAILED;agent=schema 移除+executor 拒絕物件非 TRPC error)。
+2. 1A0 拆 1A0a client-compat→1A0b server-block 兩個 deployment gate:1A0a 先改全部消費端誠實顯示+build marker(__BUILD_SHA__+boot beacon+footer sha),Jeff desktop 與 PWA 換版兩證齊才開 1A0b;不再假設舊 bundle 有新 UI。
+3. v4=單一自足全文:v1/v2 有效內容(current-state evidence 十節/truth service 邊界/三出口/1C-docs/風險表)全部併入;五 Interface 依賴型別全展開(SourceName/PeriodSpec/DataStatus/Completeness/Assurance/OperationalReason/ReasonCode/GapReason/Unit/UnsupportedBucket/SourceStamp/Coverage/Lineage/MetricEnvelope/MetricBatchV1/SourceError/NormalizedTxnRow/NormalizedFinancePeriod/ManagementPLView/ManagementTrendView/BankEvidenceExport),TypeScript stub 可直接編譯;不引用消失草稿。
+4. KPI 補第七 id kpi.ytd.netProfit;allClear 兩依賴(pendingSummary bankTransactionLinks.ts:203+trust recognition 源)明定 client-state Adapter deriveWorkState+公式(任一 error/loading/stale/count>0/null 即 false)+逐態測試。
+5. envelope exact shapes+I1-I7 不變量+subset 語意(回應 keys===請求集合,runtime 斷言);currency 補 C9 Stripe→Trust 全鏈(stripeWebhook.ts:314 `?? "usd"` 改缺值 XXX+recognized read 保幣別進 fold)。
+6. recent-auth 改 financeEvent-first 單交易順序(grant 條件消費 affectedRows===1→FOR UPDATE→INSERT financeEvents→INSERT supplierInvoiceEvents(FK 可滿足)→投影 version+1),v3 順序 FK 不可執行已更正;reAuth.issue 寫死 adminProcedure/input 恰 password+actionScope/identity 只取 ctx.user/專屬 rate-limit;password capability preflight(auth.ts "google" 僅 reCAPTCHA 親核,但不得由 code 推斷 Jeff 有可用 hash;未證前 endpoint unavailable+另裁 WebAuthn/OTP)。
+7. AP reversal 唯一模型選定=多筆 reversal 指回 original、Σ≤original 於 invoice lock 內核對、reversalOfAllocationId 撤 UNIQUE、bankTransactionId+invoiceId server 自 original 複製(caller 型別無此欄);void guard 補 disputed→void 同「無 active allocation」;lines 裁 XOR 恰一非 null 必填、Σ lines≤total 鎖內核對+invoice 級 unassignedRemainderMinor 顯性、雙 line race 測試。
+8. 固定清單全真路徑+測試檔全 `.test.ts`(vitest include 親核);agent/mobile reader 檔補入 1A0a/1A0b 清單;E4 黑箱預期改拒絕物件非 PRECONDITION_FAILED。
+9. 本段+通信+索引追加 FAIL 真值更正。
+
+範圍:只改 plan+本段追加;零新 repo 檔案;凍結面零觸碰;未 commit、未 push。交 Codex 九項差額核;全過先只授 1A0a 施工資格。
+
+### Phase 1 plan v4.1 七項機械差額窄修(2026-07-17,依 Codex 21:03 終驗 FAIL:P0 1/P1 5/P2 2,主架構通過、最後機械接線未閉)
+
+**狀態:v4.1 窄修完成,未 commit,交 Codex 只核七項差額。**
+
+先追加更正(Codex P2-2,不改寫歷史):19:45 回報與索引「九項差額返工完成」不成立——**v4 九項終驗 FAIL:P0 1/P1 5/P2 2**。反例:boot beacon 所稱「既有 funnel 端點」不存在(repo 只有 server-internal reportFunnelError,errorFunnel.ts:115,無 browser 可呼叫端點),換版雙證在固定 scope 內不可執行;executor 保留 case 與 ACTION_TYPES 移除構成 TypeScript 矛盾;allClear 混 trustDeferredList 軸且 deriveWorkState 無 freshness shape;server DataStatus 含 loading;1B 清單漏 C6-C9 三檔;grant 原子條件漏 userId;AP reversal DB 歸屬只靠 server assertion 與 criterion 不符。
+
+七項窄修逐項核銷(只原地窄修,主架構零重寫):
+1. boot telemetry 改真實 Interface:server/routers/clientBoot.ts(新)adminProcedure+closed payload(buildSha regex+clientKind 二值 enum,.strict() 拒自由文字/PII)、寫既有 append-only adminAuditLog、24h 去重、雙裝置證據=audit 列 clientKind 兩值;client 掛載 AdminShell.tsx+vite-env.d.ts global 宣告+routers.ts mount+clientBoot.test.ts 全列入 1A0a 固定清單;「既有 funnel」假設作廢。
+2. agent 封鎖改 denylist Adapter:executeOpsAction 收 raw string,BLOCKED_LEGACY_ACTIONS denylist 先攔回固定拒絕物件→ActionTypeEnum.safeParse→switch(union 已不含兩 legacy 值,無 impossible case);測試從公開 Seam 傳兩 legacy 字串+unknown 字串;E12 taxCsv 與 financeAdvisor direct-call regression 獨立測試檔(taxCsvBlocked.test.ts)入總表。
+3. allClear 裁唯一來源=pendingSummary+trustReconciliation(useCockpitData.ts:33/:81 現行事實,trustDeferredList 不混入);WorkSourceState 四態互斥,ready 明確蘊含 fresh;server DataStatus 移除 loading(client-only QueryDisplayState 另立,Phase 0 設計稿不改、語意分層聲明)。
+4. 清單同檔:1A0a 補 AccountingTab.tsx(三 plaid readers error 分支)+AdminShell/vite-env.d.ts/clientBoot 檔;1B 補 bankCsvImportService.ts(C6 註記)/accountingAgentService.ts(C7)/trustDeferralService.ts(C8+C9 recognized read 帶 currency);currencyGuard 測試補 C7-C9 regression。
+5. re-auth:grant 原子 UPDATE 補 userId=ctx.user.id 條件(洩漏 token 不可跨 session 消費);ActionScopeEnum closed 五值(ap.approve/ap.void/ap.allocate/ap.reverse/auth.canary);preflight 兩段=hash 查證+Jeff 親跑 canary 成功(hash 形狀不證知悉);atomicRateLimit(Redis INCR+EXPIRE 原子 primitive,非 TOCTOU checkRateLimit)5/900s+20 併發 burst test;reAuthGrants exact DDL(TTL 15min/UNIQUE tokenHash/INDEX(userId,actionScope,expiresAt)/7 天 lazy cleanup);步 3-5 逐步注入失敗 rollback 測試(grant 未消費+零部分列)。
+6. AP DB 歸屬保證:改獨立 supplierApAllocationReversals 表(0119 兩表),歸屬經 join 不重複存——cross-invoice/cross-bank reversal 與 reversal-of-reversal 結構上不可能;allocations 表撤 reversalOfAllocationId;Σ reversals≤original 鎖內核對+兩併發 partial 超額恰一成功測試;supplierInvoiceLines exact DDL(UNIQUE(invoiceId,lineNo)/CHECK amountMinor>0/CHECK exactly-one XOR)+五項容器負例;reAuthGrants/lines DDL 一併入 §8.1。
+7. 本段+通信+索引追加 FAIL 真值更正。
+
+範圍:只改 plan(原地窄修)+本段追加;零新 repo 檔案;凍結面零觸碰;未 commit、未 push。交 Codex 只核七項;全過即授 1A0a client-compat 施工資格。
+
+### Phase 1 plan v4.2 七組固定窄修(2026-07-17,依 Codex 21:27 終驗 FAIL:P0 0/P1 6/P2 4,不授 1A0a)
+
+**狀態:v4.2 窄修完成,未 commit,交 Codex 只核七組。**
+
+先追加更正(Codex P2-4,不改寫歷史):21:35 回報與索引「七項全部窄修」不成立——**v4.1 終驗 FAIL:P0 0/P1 6/P2 4**。反例:boot client Seam 無測試(server 端有測,承重的 AdminShell 接線無);QueryDisplayState 只是註解未固定 export 且 §7.3 又造 "error" 型別;1A0b 漏三個必轉紅現有測試;C8 誤判讀取層死碼(實為 ingest insert 路,:416-425 親核)、C9 漏月趨勢 fold 路;「原子限流」INCR+EXPIRE 兩操作仍有 crash 窗口且 repo 已有單 Lua checkAtomicRateLimit(rateLimit.ts:94)未復用;adjustment 無 scope 卻仍允許;lines 無 order/booking FK、unassignedRemainderMinor 無 DDL;reAuthGrants 無 users FK;「既有每日 cleanup worker」是假機制;三處說明殘影。
+
+七組逐項核銷:
+1. boot client Seam:純 helper 抽 client/src/layouts/adminShellBoot.ts(detectClientKind/shouldReport per-SHA guard/buildBootPayload),**成功上報才寫 guard、mutation 失敗可重試**;client/src/layouts/adminShellBoot.test.ts 入 1A0a 固定清單(exact payload/兩 clientKind/per-SHA guard/失敗重試/footer sha)。
+2. QueryDisplayState 固定 export 於 FinanceCockpit/types.ts 唯一定義處;WorkSourceState.state 復用("transport-error" 非 "error");freshness 門檻寫死=2×現行輪詢(pendingSummary 600_000ms、trustReconciliation 240_000ms;PENDING_POLL_MS=300_000/KPI_POLL_MS=120_000 親核 useCockpitData.ts:23-24)+門檻 ±1ms 邊界測試;正常輪詢下門檻不誤壓 allClear。
+3. 1A0b 固定清單補三個必轉紅現有測試(opsActions.test.ts/financeAdvisor.test.ts/taxCsvService.test.ts,同批改鎖 blocked/throw);§4.1「executor 保留 case」殘影更正為 denylist Adapter 三段解析。
+4. C8 更正=ingest `?? "XXX"`(承認 v4.1 誤判);C9 兩路 recognized 讀回帶 currency(recognizedTrustIncomeInPeriod+monthlyDeferralAdjustments/foldMonthlyDeferralAdjustments :1405/:1374);1B 補 trustDeferralService.test.ts/sentinel.test.ts/taxCsvService.test.ts 同步。
+5. re-auth:限流復用既有單 Lua self-healing checkAtomicRateLimit(rateLimit.ts:94)+TTL=-1 自癒 regression;adjustment 本期明文禁止(無 scope 即無路徑,未來 ap.adjust-total 走 contract 版本另批);reAuthGrants.userId 補 FK→users(id) ON DELETE RESTRICT;假 cleanup worker 作廢,過期列明記保留不清理。
+6. AP lines 補 customOrderId/bookingId 雙 FK(不存在 id DB 層拒)+supplierInvoices.unassignedRemainderMinor BIGINT NOT NULL DEFAULT 0 CHECK>=0 入 0118 DDL;容器負例補不存在 order/booking FK 拒。
+7. §3.1/§11(1A0a 非純 client,含 additive clientBoot)與 §9(C1-C5+C7-C9/C6 註記)殘影同步;本段+通信+索引追加 FAIL 真值。
+
+範圍:只改 plan(原地窄修)+本段追加;零新 repo 檔案;凍結面零觸碰;未 commit、未 push。交 Codex 只核七組;全過才授 1A0a client-compat。
+
+### Phase 1 plan v4.3 六個機械差額窄修(2026-07-17,依 Codex 23:09 終驗 FAIL:P0 0/P1 3/P2 3,不授 1A0a)
+
+**狀態:v4.3 窄修完成,未 commit,交 Codex 只核六項。**
+
+先追加更正(不改寫歷史):22:05 回報與索引「七組窄修完成」不成立——**v4.2 終驗 FAIL:P0 0/P1 3/P2 3**。反例:boot 承重 orchestration(mutation 成敗→guard/footer)仍藏在 AdminShell 不可測;QueryDisplayState 未取代現行 TileState/"error" 雙型別(cockpitMath.ts:316/:323-331、types.ts:9-11 親核)且 cockpitMath.test.ts:150-163 鎖 "error" 未入 scope;1B 漏 bankPLService.trend.test.ts(fixtures 無 currency,C9 後必紅)與 financialReportService.test.ts(import foldMonthlyTrend,計算面刪除後 collection 必紅);freshness 無等號案;標題仍 v4(v4.1);C8 摘要與 §7.2 矛盾。
+
+六項逐項核銷:
+1. boot orchestration 全收進 adminShellBoot.ts 可注入 Seam:`reportBootOnce({storage,buildSha,matchMediaFn,report})`(guard 已存在→skipped;await report 成功→先寫 guard 再回 reported;reject→不寫 guard 回 failed)+`shortBuildSha()` footer 唯一切法;AdminShell 只接線;adminShellBoot.test.ts 直測 success/reject/skipped/呼叫前 guard 不存在/新 sha 重報/clientKind/payload/shortBuildSha。
+2. 雙型別收掉:cockpitMath.ts TileState 改 alias QueryDisplayState、resolveTileState 回 "transport-error"、types.ts 改正向輸出;cockpitMath.test.ts 納 1A0a fixed tests 同批改期望。
+3. 1B 補兩檔+處置:bankPLService.trend.test.ts fixture 逐列補 `isoCurrencyCode:"USD"`+TWD/XXX recognized 不入收入案;financialReportService.test.ts 隨計算函式同批刪除,等價 trust-aware 月度 netProfit 契約遷 managementAdapter.test.ts(§9 新測試)。
+4. freshness 邊界改三點:−1ms ready/**===threshold ready(等號案)**/+1ms stale,兩源各測。
+5. 標題改 consolidated v4.3;測試總表 boot 行列 server clientBoot.test.ts+client adminShellBoot.test.ts 各自責任。
+6. §1.7 C8 摘要同步 ingest 真值(processTrustInflow insert 路,指向 §7.2 裁定 XXX)。
+
+範圍:只改 plan(原地窄修)+本段追加;零新 repo 檔案;凍結面零觸碰;未 commit、未 push。交 Codex 只核六項;全過才授 1A0a client-compat。
+
+### Phase 1 plan v4.3 三處總帳同步(2026-07-17,依 Codex 23:26 終驗:P0 0/P1 0/P2 2,六項承重面全 PASS,只差總帳同步)
+
+**狀態:三處 exact diff 完成,未 commit,交 Codex 核三處+hygiene。**
+
+Codex 23:26 裁定:六項實質施工契約全部 PASS(reportBootOnce Seam/QueryDisplayState 唯一 union/1B 兩檔處置/freshness 三點/標題與 boot 總表/C8 摘要),recent-auth/AP/Phase 0 凍結面零矛盾;僅餘 P2 兩組文字同步,依「全過才授權」暫不授 1A0a。三處已改:
+1. plan 頭部 v4.3 摘要第⑤項「標題改 v4.2」→「標題改 v4.3」(一字版本殘影)。
+2. 測試總表 client 狀態折疊行補 cockpitMath.test.ts(TileState→transport-error),與 §3.3 fixed list 對齊。
+3. 測試總表 1B 行抄齊 §9 fixed list:補 managementAdapter.test.ts、bankPLService.trend.test.ts、trustDeferralService.test.ts、trustDeferralService.sentinel.test.ts、taxCsvService.test.ts、financialReportService.test.ts(同批刪除)。
+
+六項承重面未重驗未重寫(依裁定)。範圍:只改 plan 三處+本段追加;未 commit、未 push。三處吻合即授 1A0a client-compat 施工資格。
+
+## 1A0a client-compat 施工完成(2026-07-18,依 Codex 23:48 正式授權,plan v4.3 §3/§3.3/§3.4)
+
+**狀態:施工+驗證完成,未 commit、未 push、未 deploy,交 Codex 1A0a 實質終驗。**
+
+施工面(全部在 §3.3 固定清單內,git status 逐檔核對零越界):
+
+1. 型別遷移:types.ts 正向定義 QueryDisplayState(唯一 union)+TileState 過渡 alias;cockpitMath resolveTileState 回 "transport-error";cockpitMath.test.ts 期望同批更正。
+2. useCockpitData 重構:逐格 state+asOf(廢頁級 max asOf 與四錯才 error)、數字欄 null 化(撤全部折 0)、deriveWorkState 兩源(FRESH_MAX_AGE 600s/240s)+isAllClear 公式;WorkColumn 三態(sourceError 卡/綠勾/工作卡),counts null 顯「—」。
+3. 消費端誠實化:TruthRow(null 安全+逐格 as-of)、PLCard/TrustCard(transport-error+null 守門)、RecognitionCard(U7 error 不消失)、AutoHandledCard/cockpitMath 兩 fold(U8 爛值不折 0,invalidCount 顯性)、PendingClaimsCard null 安全、ProfitLossV2(loadFailed 態+KPI null 顯「—」+撤 yearEndExport 鈕與 mutation)、TrustComplianceV2 三查詢 isError、PendingClaimsTab/BankLedgerV2/LedgerTrust/LedgerTriage/AccountingTab isError 分支、KpiStrip 七值 state-aware(foldKpiCards 純 fold)、DailyCheckMobile/BankTriagePage 交易讀取失敗顯性。
+4. TaxDetail:月度趨勢/Schedule C 區/1099-NEC/ZIP 匯出+plMonthlyTrend/vendor1099List/yearEndExport 呼叫全移除,原位「口徑收斂前停用」卡(768→364 行);保留期間 KPI/Trust 對稅時點/已排除防雙計。
+5. FinanceDashboard:downloadTaxCsv/askFinanceAdvisor 兩鈕與 advisor 區撤除改停用卡;保留 runFinanceAlerts。
+6. AdminHome 重寫純導航卡(五組 mock 常數全清)、AdminFinance.tsx 死碼刪除、App.tsx 註解更正。
+7. boot telemetry:adminShellBoot.ts(reportBootOnce/detectClientKind/shortBuildSha,per-SHA guard 成功才寫、reject 可重試)、AdminShell 接線+footer 短 sha、vite-env.d.ts 宣告、vite.config.ts define __BUILD_SHA__(GIT_SHA 或 git rev-parse,取不到退 "unknown" 被 payload regex 拒)、server/routers/clientBoot.ts(adminProcedure+.strict() closed payload+24h 去重+寫 adminAuditLog)、routers.ts mount。
+8. CI gate:scripts/check-no-mock.mjs+.husky/pre-push 前置+package.json check:no-mock。
+9. i18n:zh-TW/en 平行補 22 組 key(封鎖文案/無法核實/asOfLabel/home 導航)。
+
+驗證(evidence):
+
+- tsc --noEmit exit 0(親跑)。
+- 全套 vitest:**369 檔 passed/11 skipped,5603 tests passed/90 skipped,0 failed**(155s,親跑)。
+- 新測試六檔全綠:cockpitState.test.ts(deriveWorkState 逐態+freshness 三點含等號案+isAllClear 全分支)、cockpitMath.test.ts(transport-error 更名+invalidCount)、kpiStripState.test.ts(七值含 ytdNet)、adminShellBoot.test.ts(orchestration 契約:成功才寫 guard/reject 重試/skipped/新 sha 重報/payload/shortBuildSha)、clientBoot.test.ts(closed payload 拒自由文字與額外欄/去重/DB skipped/非 admin 拒)、financePagesRender.test.ts(renderToStaticMarkup:TruthRow error 不出 $0/stale/true-zero/as-of;WorkColumn sourceError 絕不綠勾/綠勾/count null 顯「—」)。
+- check-no-mock gate:OK(非 /preview/ 零 MOCK_)。
+- `?? 0` 殘留白名單(全屬成功資料的 true-zero 語意,非錯誤折疊):aggregateTrust optional 欄位加總、TrustCard/RecognitionCard 截斷門檻長度檢查、TaxDetail byCategory optional key(r 守門內)。
+- browser 級驗證未做:本地無 DATABASE_URL(CLAUDE.md 本地限制),dev server 起不了;驗證鏈=tsc+全套測試+render 測試+grep gate。
+- 已知取捨:1A0b 前 server 仍 fail-open,error 態在 prod 出現頻率低;1A0a 的價值是把「若 server 開始回錯,client 全鏈誠實顯示」鋪好,是 1A0b 的硬前置。
+
+範圍:§3.3 固定清單內 35 M+10 新檔(含 plan/progress docs);零 schema、零 migration、零 Trust gate、零 STATE;未 commit、未 push、未 deploy。交 Codex 1A0a 實質終驗;終驗過後由 Jeff pnpm ship 部署+§3.4 兩證(audit 列 desktop+PWA/footer sha)才開 1A0b 申請。
+
+## 1A0a 實質終驗返工(2026-07-18,依 Codex 12:05 終驗 FAIL:P0 0/P1 8/P2 4,六項固定返工)
+
+**狀態:六項返工完成,未 commit,交 Codex 重做 production-build+consumer-matrix 終驗。**
+
+先追加更正(不改寫歷史):上一段「1A0a 施工完成」的機械數字屬實,但綠燈沒覆蓋 production build、完整 consumer graph 與頁面 render——**Codex 12:05 實質終驗 FAIL:P0 0/P1 8/P2 4**,不授 commit/1A0b。八項 P1 反例全機械可重現:①部署 build marker 必為 unknown(Dockerfile 無 ARG GIT_SHA、.dockerignore 排除 .git、safe-deploy 未傳 build-arg)→ 雙裝置換版證據不可達;②AdminHome 兩卡 href 進 404(/admin/* vs 真路由 /ops/*)+Wouter nested anchor;③TaxDetail 冷載/切換把「尚未取得」畫 $0、prev 失敗當 no-prior;④TrustCompliance 冷啟顯假 $0/假勾稽乾淨;⑤BankLedger 漏 transactionAuditHistory/linkedAccountsList 兩 reader;⑥cached-empty+refetch error 落假 all-clear/空清單(BankTriage/LedgerTriage/PendingClaimsTab/多處 stale 未標);⑦render test 只 import TruthRow/WorkColumn,production 元件零直接 test;⑧PendingClaimsCard 越界(未列 §3.3)且回報「零越界」不實。P2:boot 跨層 ack 語意錯(resolved 就寫 guard、audit 吞錯仍回 reported)、dedup 非原子卻宣稱精確+無 rate-limit denied 測試、mobile 文案硬編中文、AutoHandled header 未知態顯 0。
+
+六項固定返工逐項核銷:
+1. R1 production build SHA:Dockerfile 加 ARG GIT_SHA+ENV GIT_SHA(RUN pnpm build 前);vite.config.ts define __BUILD_SHA__ 讀 process.env.GIT_SHA(取不到退 unknown,被 payload regex 拒);safe-deploy.mjs 從已核准 HEAD 取 40-hex sha、非法即 fail、deploy 與 dry-run 皆帶 --build-arg GIT_SHA=<sha>;safe-deploy.test.mjs 加四測(exact build-arg/dry-run 顯示/host git 為唯一真值源契約/非法 sha fail),node --test 36 綠。
+2. R2 AdminHome:四卡 href 改 /ops/finance、/workspace、/ops/customers、/ops/tours;NavCard 改 Wouter 3 <Link className> 單一 anchor 無 nested;adminHomeRender.test.ts 斷言三 /ops 卡 href+零 nested anchor+零 $。
+3. R3 全 reader 五態:TaxDetail 四 KPI+Trust 兩行改 loading skeleton/transport-error/stale gate+prev 失敗顯 prevUnverifiable(≠no-prior);TrustComplianceV2 頁首 subtitle+KPI 隨 recon transport-error 整條錯誤態、stale opacity、deferredList/audit cached-empty+error 標 stale;BankLedgerV2 補 transactionAuditHistory+linkedAccountsList 兩 reader isError+主 list stale;TrustCard 明細源 detailLoading/detailCold/detailStale;RecognitionCard/ProfitLossV2/AccountingTab/PendingClaimsTab/LedgerTrust/LedgerTriage/BankTriagePage/DailyCheckMobile/KpiStrip 全補 cached refetch error 的 stale(cached-empty+error 不再落 all-clear/空清單/全部清完)。
+4. R4 承重測試:financePagesRender.test.ts 擴 render TaxDetail/TrustComplianceV2/ProfitLossV2 cold-error(斷言無 $0+有錯誤文案);adminHomeRender.test.ts href/anchor;誠實標記:BankLedgerV2/AccountingTab 極重未直接 render(logic+i18n 覆蓋),GAP 如實列入下輪。
+5. R5 boot ack:reportBootOnce 只在 status===reported||deduped 寫 guard,skipped/failed/未知/reject 不寫回 failed 可重試;clientBoot.ts 回 reported 前 exact re-query(findRow 二次)證持久化、查不到回 failed、未動共用 audit、dedup 誠實標 best-effort;測試補 skipped→failed/未知→failed/deduped→寫 guard/durable ack 查不到→failed/best-effort 併發兩列/rate-limit denied→throw。
+6. R6 scope+文字:plan §3.3 補列 PendingClaimsCard.tsx+Dockerfile+safe-deploy 兩檔;AutoHandledCard header 未知態改「—」(summary nullable);mobile 三檔 error/stale 文案全走 t()+zh/en parity;本段+通信+索引追加 FAIL 真值。
+
+驗證 evidence:
+- tsc --noEmit exit 0(親跑)。
+- 全套 vitest:**370 檔 passed/11 skipped,5616 tests passed/90 skipped,0 failed**(167s 親跑)。
+- node --test scripts/safe-deploy.test.mjs:36 綠(含四 build-arg 契約)。
+- check-no-mock OK;i18n parity 2 綠。
+- 對抗式驗證工作流(七 agent,read-only)獨立複核六返工項+回歸掃描(進行中,結論收斂後補記)。
+- 允許新增檔:Dockerfile(改)、scripts/safe-deploy.mjs(改)、scripts/safe-deploy.test.mjs(改)、FinanceCockpit/PendingClaimsCard.tsx(既在清單,§3.3 補列)、client/src/pages/adminHomeRender.test.ts(新測試檔);未新增 migration/schema;Trust/recognition gate 零改動。
+
+範圍:1A0a 固定清單+本輪返工檔;零 schema、零 migration、零 Trust gate、零 STATE、零 1A0b/1A1/1B/1C;未 commit、未 push、未 deploy。交 Codex 重做 production-build+完整 consumer-matrix 終驗。
+
+### 自我對抗式複驗與二次補洞(2026-07-18,交 Codex 前的獨立 gate)
+
+交 Codex 前,先跑七 agent 對抗式驗證工作流(read-only,逐項扮 Codex 找漏)複核六返工項,抓到並補完下列真漏洞(非 Codex 指出,是我方在交件前自查):
+
+- R1 CLOSED(附一項誠實修正):Docker build 內 ARG GIT_SHA="" 使 process.env.GIT_SHA 為空字串而非 undefined,`?? ` 不觸發 → __BUILD_SHA__ 實為 "" 非 "unknown",與註解不符。改 `||` 讓空字串也退 git rev-parse/unknown;不破閉合(sanctioned 部署一律傳 40-hex,"" 與 "unknown" 皆被 clientBoot regex 拒)。
+- R2 GAP→CLOSED:adminHomeRender.test.ts 原只斷言三 href,漏第四張 /workspace(Codex 明文要求斷言四 href)。補 `href="/workspace"` 斷言;突變抽核:改壞該 href 測試轉紅。
+- R3 GAP→CLOSED(五處):①AccountingTab 五個未修 reader(pendingCount 改 null→badge 顯「!」不隱藏;pendingQuery/entriesQuery/invoicesQuery/recurringQuery 四表補 cold-error loadFailed+cached-stale staleHint 三段);②BankLedgerV2 transactionAuditHistory 補 stale(cached-empty 不再畫成「沒有紀錄」);③BankLedgerV2 CSV 帳戶下拉補 stale;④TrustComplianceV2 per-account cached-empty+error 補 stale(不畫假「無帳戶」)、deferredList cached-nonempty+error 補表上 stale 標記;⑤DailyCheckMobile 24h 活動流補 isError(cold+stale,走 t()),不再把讀取失敗畫成「一切安靜」。
+- R4 PARTIAL→實質 CLOSED(附誠實殘留):新增 financeReadersRender.test.ts 實際 renderToStaticMarkup 六個 Codex 點名「零直接 test」元件(BankLedgerV2/AccountingTab/PLCard 替 LedgerColumn/TrustCard/PendingClaimsCard/KpiStrip),16 render 測試綠。二次收緊:AccountingTab P&L cold-error banner 改專屬 key admin.accounting.plUnverifiable(與 tab badge/表體 loadFailed 分源),**突變抽核親跑證明——刪 banner 使測試轉紅、還原轉綠**;TrustCard 補「數字全非 null 但 state=transport-error」獨立釘 state token;KpiStrip 去除冗餘 `|| data===undefined` 使 token 承重;PLCard 補 true-zero($0 月 plEmptyNote)render;PendingClaimsCard 補 true-zero(pendingEmpty)+header count===null loadError render;TrustComplianceV2 補頁級 cached-stale+true-zero render。誠實殘留:TaxDetail 頁級 true-zero/stale 因多 query 不同 shape 無法用單一 mock 乾淨 render,其逐 KPI 的 loading/transport-error/stale gate 由 per-tile resolveTileState 邏輯+cold-error 頁級 render 覆蓋——此為能力邊界如實聲明,非隱瞞。
+- R5 CLOSED、R6 CLOSED、回歸掃描 CLOSED(七 agent 判定;無 gap)。
+
+補洞後驗證:tsc 0 錯;全套 vitest **371 檔 passed/5632 tests passed/90 skipped,0 failed**(478s 親跑);AccountingTab banner 突變抽核親跑紅→還原綠;check-no-mock OK;i18n parity 綠(含新 activityUnverifiable/activityEmpty/plUnverifiable 三組 zh+en);git diff --check 乾淨、staged 0、越界 0(schema/migration/drizzle/Trust gate/STATE 零命中)。
+
+新增/改動的返工檔(允許清單內):client/src/components/admin-v2/financeReadersRender.test.ts(新,R4 承重 render);AccountingTab.tsx(五 reader+plUnverifiable key);BankLedgerV2.tsx(兩 reader stale);TrustComplianceV2.tsx(per-account/deferredList stale);DailyCheckMobile.tsx(活動流 isError);KpiStrip.tsx(token);TrustCard.tsx(已含明細態);vite.config.ts(空字串 fallback);adminHomeRender.test.ts(四 href);i18n zh/en(三新 key)。
+
+範圍不變:零 schema/migration/Trust gate/STATE/1A0b/1A1/1B/1C;未 commit、未 push、未 deploy。交 Codex 重做 production-build+完整 consumer-matrix 終驗。
+
+## 1A0a production-build+consumer-matrix 重終驗返工(2026-07-18,依 Codex 13:48 FAIL:P0 0/P1 4/P2 4)
+
+**狀態:七項固定窄修完成,未 commit,交 Codex 只核本輪差額。**
+
+先追加更正(不改寫歷史):上段的 5,632 綠與 production build 數字屬實,但**全綠沒覆蓋 consumer 五態與其承重測試——Codex 13:48 重終驗 FAIL:P0 0/P1 4/P2 4**,不授 commit/1A0b。R1 build SHA、R2 AdminHome、R5 boot guard 主鏈已 PASS;阻斷點=consumer 五態(手機逐筆分類可在 stale 資料上寫入/PendingClaims 用 cold error 蓋掉 cached 工作/BankLedger cached-empty stale 同時顯 clean empty/loading-unknown 被畫成 0 或空/RecognitionCard/TrustCard/activity 分支順序吃掉 stale/TaxDetail 把 stale 前期當 current)與承重測試(render test 只 import 兩元件、production consumer 零直接 render 測試、plan §3.3 反向縮小 criterion)+safe-deploy Docker 契約不承重+clientBoot durable ack 只證 row 存在未證 hash-chain。
+
+七項固定窄修逐項核銷:
+1. BankTriagePage:任何 cached-stale 顯明確 staleWriteBlocked banner,fresh 前禁分類/排除 mutation(confirmAI/overrideCategory/markExcluded/swipe onTouchEnd 四路徑皆 guard;pill/排除/確認鈕 disabled、跳過鈕不擋);抽 shouldBlockTriageWrite 純函式(bankTriageGuard.test.ts 釘 cold/stale/fresh)。
+2. PendingClaimsCard cached-stale 保留 cached rows+表首 stale badge(cold loadError 只在 data===undefined);BankLedgerV2 EmptyState 加 !isError(cached-empty stale 不同時顯 clean empty)、StatusToggle count number|null 顯「–」、counts 在 loading/cold-error 全 null。
+3. DailyCheckMobile totalReviewPile number|null(未取得「–」不寫 0 筆);AccountingTab pending badge loading 不顯 !、四表加 loading branch、trend loading 骨架不畫「沒有趨勢資料」;LedgerTriage 副標未取得顯「–」;LedgerTrust 初載骨架不畫空殼。
+4. RecognitionCard stale 判定移到 count===0 return 之前(stale+0 筆顯提示不消失);TrustCard allZero 加 !detailStale;DailyCheckMobile activity stale 保留 cached rows+badge;TaxDetail prevState==="stale" 顯 prevUnverifiable(不把 stale growth 當 current)、exclusion 卡 curState stale 標記。
+5. 承重測試:新 financeConsumersRender.test.ts+擴 financeReadersRender.test.ts 實 render 15 個 consumer;plan §3.3 換誠實逐 consumer 覆蓋表(11 個三態齊+BankTriage 含禁寫 lock;AccountingTab/DailyCheckMobile/TaxDetail 的 stale/zero 因多 query shape 互斥+Radix Tabs/KpiStrip SSR 全渲染會崩,列殘留與理由,不弱述蓋過);BankTriage staleWriteBlocked+AccountingTab plUnverifiable 突變抽核親跑紅→綠。
+6. safe-deploy 加 Docker 接線契約(讀 Dockerfile 斷言 ARG/ENV GIT_SHA 在 build 前、.dockerignore 排 .git、vite define 讀 process.env.GIT_SHA 且非 `?? `;刪 ARG/ENV 或改回 `?? ` 會紅);clientBoot durable ack re-query 改 isNotNull(rowHash)——只證 row 存在不夠,要 hash-chain 完成才回 reported;測 hash update 失敗→failed。
+7. 本段+通信+索引追加 13:48 FAIL 真值。
+
+驗證 evidence:tsc 0 錯;全套 vitest **373 檔 passed/5664 tests passed/90 skipped,0 failed**（158s 親跑）；node --test safe-deploy 39 綠（含 3 Docker 接線契約）；BankTriage/AccountingTab 突變抽核親跑紅→還原綠；check-no-mock OK;i18n parity 綠（含新 staleWriteBlocked/activityUnverifiable/activityEmpty/plUnverifiable/accounting.loading）。對抗式複驗二輪（七 agent，read-only）判窄修 2/3/4/6 CLOSED，窄修 1/5/7 抓到 gap 已本輪補完（互動 predicate 測試/逐 consumer stale-zero 補測+誠實殘留表/本 FAIL 真值段）。
+
+誠實揭露(超出七項窄修,建議 Codex 評估):auditLog.ts 的 hash-chain 與 durable-ack 互動——audit() UPDATE 失敗留 rowHash-null 孤列,verifyAuditChain 會判鏈斷;durable-ack 用來當失敗訊號的 rowHash-null 正是會破壞防竄鏈的同一狀態。此為既有結構(非本輪引入),clientBoot 重試只新增好列、孤列仍在;列為 backlog 待 1A0b audit 證據閘定案前處理。
+
+新增/改動返工檔(允許清單內):financeConsumersRender.test.ts+bankTriageGuard.test.ts(新測試);BankTriagePage/PendingClaimsCard/BankLedgerV2/DailyCheckMobile/AccountingTab/LedgerTriage/LedgerTrust/RecognitionCard/TrustCard/TaxDetail(consumer 五態);clientBoot.ts(rowHash);safe-deploy.mjs/test.mjs(Docker 契約);vite.config.ts(空字串 fallback);i18n zh/en。零 schema/migration/Trust gate/STATE/1A0b/1A1/1B/1C;未 commit、未 push、未 deploy。交 Codex 只核本輪差額。
+
+## 1A0a 差額終驗第 4 回合窄修(2026-07-18,依 Codex 15:56 FAIL:P0 0/P1 3/P2 2)
+
+**狀態:六項固定窄修完成,未 commit,交 Codex 只核本輪差額。**
+
+先追加更正(不改寫歷史):上段的 5,664 綠與突變抽核屬實,但 **Codex 15:56 差額終驗 FAIL:P0 0/P1 3/P2 2**,不授 commit/1A0b。P1:BankLedgerV2 cached-empty stale 仍報五個 0+clean empty、AccountingTab plTrend cached-empty stale 落 clean「沒有趨勢資料」、consumer 矩陣+BankTriage 互動 regression 突變不紅(移除 handler guard 25/25 仍綠);P2:safe-deploy 非真 Docker 產物契約、clientBoot 測試 stub 無視 where predicate。Codex 另裁 auditLog hash-chain 揭露「內容屬實,不另計本輪,列 1A0b 前 mandatory backlog/stop-line(接受 §3.4 雙裝置證據前必確認 verifyAuditChain().ok)」。
+
+六項窄修逐項核銷(前半由前工人完成,後半本回合收尾):
+1. BankLedgerV2 cached-empty stale:counts 判定納入 isError+空快取(五 pill 顯「–」),EmptyState/DataTable clean 空態不再與 stale 同畫面;financeConsumersRender 補精確 regression(「–」計數≥5、不出「暫無資料」/emptyTitle/loadFailed、tabular-nums 不出 0),另補 loading 顯「–」與 true-zero 顯 0 的雙向分離測試。
+2. AccountingTab plTrend cached-empty stale:分支鏈加 isError+空陣列 → staleHint,不落 clean「沒有趨勢資料」;path-aware 測試釘 staleHint 出現且 clean 零態/冷錯文案不得出現;另補 plTrend loading 骨架回歸鎖與四表(pending/entries/invoices/recurring)cached-empty stale 逐表計數測試(測試層以「全部展開」tabs mock 使非 active tab 表格可被靜態 render 承重)。
+3. consumer 三態矩陣+BankTriage 互動:financeConsumersRender.test.ts 升級 per-procedure 狀態表(逐 procedure 給正確 shape、同 procedure 依 input 分流),AccountingTab/DailyCheckMobile/TaxDetail/ProfitLossV2 stale/zero 殘留全數清除;新增 bankTriageInteraction.test.ts(jsdom):真 touch/click 事件+mutation spy,fresh 四路徑 exact payload 對照組、cached-stale 四路徑零呼叫、被擋不 advance(「1 / 1」正斷言)、stale 跳過不顯「全部清完」;BankTriagePage 四寫入路徑收斂為單一 performTriageWrite chokepoint(15:56 P1-3 對症:疊床架屋雙 guard 使「移除其一」測不出)。plan §3.3 殘留例外全移除,12:05 criterion 全額恢復。
+4. safe-deploy 真產物契約:新測試依 .dockerignore 把 working tree 複製成無 .git context(斷言 .git 缺席),解析 Dockerfile 未註解 ARG/ENV 接線決定 GIT_SHA 是否進 build env,實跑 `pnpm build` 後掃 dist/public 要求 exact 40-hex HEAD sha;build env 以 GIT_DIR=<ctx>/.git(不存在)+GIT_CEILING_DIRECTORIES=dirname(ctx) 三層封死 git repo 探索(容器內無 repo 的忠實模擬,EPERM fallback 或外層 GIT_DIR 洩漏下突變仍必紅)。
+5. clientBoot 真 predicate 評估:DB stub 以 MySqlDialect 渲染 production where 對 in-memory rows 逐條求值(=/>=/like/is not null,未知條件 fail-closed throw;timestamp param 依 driver 格式明確以 UTC 解析,TZ=UTC/Asia/Taipei/本地全綠);audit mock 真插列,三模式(chained/hash-update-failed/swallowed)實際模擬 insert 成功+hash update 失敗→failed;dedup 條件逐條承重(不同 kind/sha/user/action、25h 舊列不 dedup;23h 列 dedup 釘視窗下界;rowHash-null 孤列不擋重試)。
+6. 本段+通信+索引追加 15:56 FAIL 真值(歷史原文不改)。
+
+突變抽核親跑(紅→還原綠,全部真跑):BankTriage 移除 performTriageWrite guard→互動測試 2 紅(swipe 右/左);blocked 路徑 return true(advance 繞過)→1 紅;clientBoot 移除 isNotNull→2 紅、findRow(true)→false→1 紅;Dockerfile 註解 ARG/ENV→產物契約 1 紅;vite 強制 unknown→1 紅;AccountingTab 刪 entries 表 stale 分支→1 紅。各突變還原後對應檔全綠。
+
+驗證 evidence(全部親跑):tsc 0 錯;全套 vitest **374 檔 passed/11 skipped,5,696 tests passed/90 skipped,0 failed**(158.31s);focused 11 檔 167/167;node --test safe-deploy **40/40**(含真產物契約,單測 ~23s);check:no-mock OK;git diff --check 乾淨;i18n parity 7,965/7,965(missing 0/extra 0/hardcoded 0)。交件前對抗式自查(六 agent 唯讀 workflow)抓到 safe-deploy GIT_CEILING no-op(blocking,已修)、clientBoot 時區洞與 eq(action) 缺測、互動 advance 斷言可繞、BankLedger/AccountingTab loading 及四表 stale 缺測——均已本回合封死並親跑突變驗證。
+
+誠實揭露(非本輪擋板):react-query v5 offline paused 態(isLoading/isError 雙 false+data undefined)會在多個 consumer 落 clean 空態/零——與 15:56 P1-1 處方採同一 isLoading/isError/data 三元組慣例,離線 client-side 導航才可達,列後續批次五態契約統一時處理。
+
+新增/改動返工檔(允許清單內):production 三檔=窄修 1-3 必需(BankLedgerV2.tsx counts null 判定、AccountingTab.tsx plTrend stale 分支、BankTriagePage.tsx 四寫入路徑收斂單一 chokepoint —— 後者是 15:56 P1-3「疊床架屋雙 guard 使移除其一測不出」的對症解,shouldBlockTriageWrite 條件不變、行為等價);測試=bankTriageInteraction.test.ts(新檔)+financeConsumersRender/financeReadersRender/clientBoot.test/safe-deploy.test 強化;文件=plan §3.3 殘留清零+本段+通信+索引真值。Dockerfile/vite.config.ts 本回合未改(mtime 變動來自突變抽核改→還原,內容與 15:56 裁定時 byte 相同)。零 schema/migration/Trust gate/STATE/1A0b/1A1/1B/1C;未 commit、未 push、未 deploy;staged 0。

@@ -52,6 +52,7 @@ export const BACKEND_ONLY_ENDPOINTS = [
   "POST /api/admin/guest-noise-hygiene-report",
   "POST /api/admin/imessage-check-known-phones",
   "POST /api/admin/imessage-ingest",
+  "POST /api/admin/audit-chain-epoch",
 ] as const;
 
 export interface StorefrontBootPlan {

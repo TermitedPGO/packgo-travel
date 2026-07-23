@@ -26,20 +26,16 @@
  *   1 — any batch failed; Sentry has the exception
  */
 
-import { eq, isNotNull, and, sql, asc, desc } from "drizzle-orm";
+import { eq, isNotNull, and, sql, asc } from "drizzle-orm";
 import {
   bookingParticipants,
   visaApplications,
-  adminAuditLog,
 } from "../../drizzle/schema";
 import { getDb } from "../db";
 import { encryptToken, isEncrypted } from "../_core/tokenCrypto";
 import { createChildLogger } from "../_core/logger";
 import { captureException, initSentry } from "../_core/sentry";
-import {
-  canonicalAuditRow,
-  computeRowHash,
-} from "../_core/auditLog";
+import { systemAuditStrict } from "../_core/auditLog";
 
 const log = createChildLogger({ module: "backfillPassportEncryption" });
 
@@ -142,59 +138,24 @@ async function backfillTable(
 }
 
 /**
- * Write a single audit-log row marking that this backfill ran. Uses the
- * same canonical-row + hash-chain machinery as server/_core/auditLog.ts's
- * `audit()` helper so the verifier sees a clean chain across boundary
- * between human-triggered and system-triggered entries.
+ * Write a single audit-log row marking that this backfill ran.
  *
- * Actor = system user (userId 0, role "system"). The auditLog schema
- * allows arbitrary integer userIds and string roles.
+ * Codex R6-3(writers 真閉合):不再自帶 clone —— 改走主通道 systemAuditStrict
+ * (server/_core/auditLog.ts):同一 Redis tip-lock 鎖域、同 canonical、同截秒、
+ * 同 payload retry。與 app 併發不再可能 Y 叉(同鎖序列化);環境無 Redis 時
+ * 主通道自動降級為無鏈孤列+大聲報錯(fail-visible),本工具照實回報。
  */
 async function writeAuditRow(result: BackfillResult): Promise<void> {
-  const db = await getDb();
-  if (!db) return;
-
-  const createdAt = new Date();
-  const rowSansId = {
-    userId: 0, // system actor
-    userEmail: "system@packgo.local",
-    userRole: "system",
-    action: "passport_backfill_run",
-    targetType: result.table,
-    targetId: null,
-    changes: JSON.stringify({
-      rowCount: result.rowsProcessed,
-      durationMs: result.durationMs,
-      table: result.table,
-    }),
-    reason: null,
-    ipAddress: null,
-    userAgent: null,
-    success: 1,
-    errorMessage: null,
-    createdAt,
-  };
-
-  // Read tip (chain head) BEFORE insert so we can chain correctly.
-  const tip = await db
-    .select({ rowHash: adminAuditLog.rowHash })
-    .from(adminAuditLog)
-    .orderBy(desc(adminAuditLog.id))
-    .limit(1);
-  const previousHash = tip[0]?.rowHash ?? "GENESIS";
-
-  const ins = await db.insert(adminAuditLog).values(rowSansId);
-  const insertId = Number((ins as unknown as { insertId: number }[])[0]?.insertId ?? 0);
-  if (!insertId) {
-    log.warn({ result }, "[backfill] audit insert returned no id; row written unhashed");
-    return;
+  const receipt = await systemAuditStrict(
+    "system:passportBackfill",
+    "passport_backfill_run",
+    null,
+    { rowCount: result.rowsProcessed, durationMs: result.durationMs, table: result.table },
+    { targetType: result.table },
+  );
+  if (!receipt.hashed) {
+    log.error({ insertId: receipt.insertId }, "[backfill] audit row left unhashed (verifier will flag missing-hash)");
   }
-  const canonical = canonicalAuditRow({ id: insertId, ...rowSansId });
-  const rowHash = computeRowHash(previousHash, canonical);
-  await db
-    .update(adminAuditLog)
-    .set({ previousHash, rowHash })
-    .where(eq(adminAuditLog.id, insertId));
 }
 
 async function main(): Promise<void> {

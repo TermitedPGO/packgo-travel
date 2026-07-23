@@ -83,7 +83,7 @@ WebScraperAgent → ContentAnalyzerAgent → [並行] ColorThemeAgent + ImagePro
 
 - Vitest；後端測試放 `server/*.test.ts`；跑 `pnpm test`。禁止測試插真實資料進 DB。
 - tsc OOM 時：`NODE_OPTIONS="--max-old-space-size=6144" pnpm tsc --noEmit`（本機記憶體吃緊，重型 transform 會 OOM）。
-- 本地 checkout 無 DATABASE_URL：任何 DB 查寫、重抓資料要在 prod/Fly 上跑，本地只能改 code。
+- 本地 checkout 無 DATABASE_URL：不代表可拿 prod 當測試環境。prod 診斷預設唯讀+最小權限+核准腳本+留 audit；runtime 禁 DDL；重抓/回填/破壞性驗證/資料修復先在隔離 clone，沒有安全環境就停手回報。權限五分（唯讀查核/受控寫入/migration/回填/還原演練），不用「DB 操作」一詞包成一類。全文：`docs/agent/60-evidence-and-ops.md` §6。
 - Checkpoint 時機：新功能完成 / 重大 bug 修復 / 設計大調 / schema 變更。前置：tsc 0 錯、新功能有 Vitest、`docs/features/<name>/progress.md` 已回寫實際狀態（含「已部署 vN」）。
 
 ## 8. 部署（紅線，全文）

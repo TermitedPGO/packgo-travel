@@ -63,7 +63,10 @@ export function readAutoSendPolicy(policy: Record<string, unknown> | null | unde
       typeof p.autoSendDailyCap === "number" && p.autoSendDailyCap >= 0
         ? p.autoSendDailyCap
         : 10,
-    blockAttachments: p.autoSendBlockAttachments !== false,
+    // DEPRECATED (Codex 12:01 §五.1): attachments are now a HARD exclusion in
+    // evaluateAutoSend — this key is kept only so the policy admin UI shape
+    // stays stable; its value no longer opens anything.
+    blockAttachments: true,
   };
 }
 
@@ -89,8 +92,15 @@ export function evaluateAutoSend(
   //    remaining gates as if the class were allowed.
   const classAllowed = p.classes.includes(input.classification);
 
-  // 3. attachments — usually documents/IDs; humans look at those.
-  if (input.hasAttachments && p.blockAttachments) {
+  // 3. attachments — HARD exclusion, same tier as the money/legal classes
+  //    (Codex 12:01 §五.1). Regex matchers were proven unable to bound
+  //    natural-language read-failure wording across four independent fresh
+  //    corpora, so attachment mail is suspended from autonomous send
+  //    entirely: the PDF still parses and drafts, but a human sends. No
+  //    policy key can reopen this — `autoSendBlockAttachments` is dead.
+  //    Future re-enable = a separate controlled-template / structured-output
+  //    project with shadow evidence, not more regex.
+  if (input.hasAttachments) {
     return { verdict: "draft", reason: "has-attachments" };
   }
 

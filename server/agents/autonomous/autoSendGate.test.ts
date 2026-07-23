@@ -50,6 +50,17 @@ describe("evaluateAutoSend — 硬規則", () => {
     expect(v).toEqual({ verdict: "draft", reason: "has-attachments" });
   });
 
+  // Codex 12:01 §五.1 — attachments 是 HARD exclusion:曾經的政策繞道
+  // `autoSendBlockAttachments=false`(12:01 §三.3 證明可在全開政策下真寄信)
+  // 已作廢,任何政策組合都打不開。
+  it("帶附件 + autoSendBlockAttachments=false(已死的繞道)→ 仍 draft", () => {
+    const v = evaluateAutoSend(
+      input({ hasAttachments: true }),
+      { ...OPEN_POLICY, autoSendBlockAttachments: false },
+    );
+    expect(v).toEqual({ verdict: "draft", reason: "has-attachments" });
+  });
+
   it("信心不足 → draft", () => {
     const v = evaluateAutoSend(input({ confidence: 89 }), OPEN_POLICY);
     expect(v).toEqual({ verdict: "draft", reason: "below-confidence" });

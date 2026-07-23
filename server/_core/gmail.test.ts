@@ -21,11 +21,20 @@ vi.mock("./tokenCrypto", () => ({ decryptToken: (s: string) => s }));
 vi.mock("./logger", () => ({
   createChildLogger: () => ({ warn: vi.fn(), info: vi.fn(), error: vi.fn(), debug: vi.fn() }),
 }));
+// Inline-attachment tests route real bytes through the real attachmentParser;
+// only the LLM vision layer is mocked (never call a model from unit tests).
+vi.mock("./imageOcr", () => ({
+  extractImageText: vi.fn(async () => ({ ok: true, text: "夏威夷海報文字 mock OCR" })),
+  extractPdfText: vi.fn(async () => ({ ok: false, text: "" })),
+}));
 
 import {
   buildMimeReply,
   parseRfcMessageId,
   resolveDirection,
+  listMessagesByIds,
+  buildHydrationFailureSentinels,
+  fetchRawAttachments,
   type SendReplyInput,
 } from "./gmail";
 
@@ -205,5 +214,461 @@ describe("buildMimeReply — footer 跟客人語言相容(2026-07-01 英文客�
     expect(afterBody).not.toMatch(/—|–/);
     expect(afterBody).not.toContain("AI");
     expect(afterBody).not.toContain("自動回覆");
+  });
+});
+
+// ──────────────────────────────────────────────────────────────────────
+// Attachment existence evidence (Codex 14:07 P1-3, pdf-attachment-
+// reliability): a whole-hydration failure or a per-message cap overflow
+// must NEVER read as "no attachments" — the reply gate needs sentinels.
+// ──────────────────────────────────────────────────────────────────────
+
+describe("attachment existence evidence (Codex 14:07 P1-3)", () => {
+  const b64url = (s: string) =>
+    Buffer.from(s, "utf-8").toString("base64").replace(/\+/g, "-").replace(/\//g, "_");
+  const attPart = (i: number) => ({
+    filename: `file${i}.txt`,
+    mimeType: "text/plain",
+    body: { attachmentId: `att${i}`, size: 11 },
+  });
+  const buildFakeGmail = (payload: unknown) =>
+    ({
+      users: {
+        messages: {
+          get: vi.fn().mockResolvedValue({
+            data: {
+              id: "m1",
+              threadId: "t1",
+              labelIds: ["INBOX"],
+              internalDate: "1750000000000",
+              snippet: "",
+              payload,
+            },
+          }),
+          attachments: {
+            get: vi.fn().mockResolvedValue({ data: { data: b64url("hello world") } }),
+          },
+        },
+      },
+    }) as any;
+
+  it("6th+ attachment over the 5-cap becomes a not_processed sentinel, not a silent drop", async () => {
+    const payload = {
+      parts: [
+        { mimeType: "text/plain", body: { data: b64url("body text") } },
+        attPart(1),
+        attPart(2),
+        attPart(3),
+        attPart(4),
+        attPart(5),
+        attPart(6),
+      ],
+    };
+    const [msg] = await listMessagesByIds(buildFakeGmail(payload), ["m1"]);
+    expect(msg.attachments).toHaveLength(6);
+    expect(msg.attachments.filter((a) => a.parseStatus === "ok")).toHaveLength(5);
+    const sentinel = msg.attachments[5];
+    expect(sentinel.parseStatus).toBe("not_processed");
+    expect(sentinel.filename).toBe("file6.txt");
+    expect(sentinel.text).toBe("");
+    expect(sentinel.parseError).toContain("cap");
+  });
+
+  it("whole-hydration failure yields fail-closed sentinels instead of attachments=[]", async () => {
+    // A part whose property access throws makes the entire
+    // fetchAndParseAttachments call die — the old code left attachments=[]
+    // and the reply gate treated the email as attachment-free. (The trap
+    // sits on `filename` — the identity field every walk must touch.)
+    const evil: Record<string, unknown> = {};
+    Object.defineProperty(evil, "filename", {
+      get() {
+        throw new Error("boom hydration");
+      },
+      enumerable: true,
+    });
+    const payload = { parts: [evil] };
+    const [msg] = await listMessagesByIds(buildFakeGmail(payload), ["m1"]);
+    expect(msg.attachments.length).toBeGreaterThan(0);
+    expect(msg.attachments.every((a) => a.parseStatus === "not_processed")).toBe(true);
+  });
+
+  it("buildHydrationFailureSentinels lists real filenames when the payload walk succeeds", () => {
+    const payload = { parts: [attPart(1), attPart(2)] };
+    const s = buildHydrationFailureSentinels(payload, new Error("import died"));
+    expect(s).toHaveLength(2);
+    expect(s[0].filename).toBe("file1.txt");
+    expect(s.every((x) => x.parseStatus === "not_processed")).toBe(true);
+    expect(s[0].parseError).toContain("import died");
+    expect(s.every((x) => x.text === "")).toBe(true);
+  });
+
+  it("buildHydrationFailureSentinels falls back to one generic sentinel when even the walk fails", () => {
+    const evil: Record<string, unknown> = {};
+    Object.defineProperty(evil, "filename", {
+      get() {
+        throw new Error("walker boom");
+      },
+      enumerable: true,
+    });
+    const s = buildHydrationFailureSentinels({ parts: [evil] }, new Error("orig"));
+    expect(s).toHaveLength(1);
+    expect(s[0].parseStatus).toBe("not_processed");
+  });
+});
+
+// ──────────────────────────────────────────────────────────────────────
+// Inline body.data attachments (Codex 16:02 P1-1): Gmail puts small
+// attachments' full content directly in body.data (no attachmentId).
+// The old collector dropped them → attachments=[] → the reply gate and
+// auto-send gate treated the email as attachment-free. Real bytes, real
+// parser; only imageOcr (LLM) is mocked at module top.
+// ──────────────────────────────────────────────────────────────────────
+
+describe("inline body.data attachments (Codex 16:02 P1-1)", () => {
+  const b64url = (buf: Buffer | string) =>
+    (Buffer.isBuffer(buf) ? buf : Buffer.from(buf, "utf-8"))
+      .toString("base64")
+      .replace(/\+/g, "-")
+      .replace(/\//g, "_");
+  const idPart = (i: number) => ({
+    filename: `byid${i}.txt`,
+    mimeType: "text/plain",
+    body: { attachmentId: `att${i}`, size: 11 },
+  });
+  const inlinePart = (filename: string, mimeType: string, bytes: Buffer | string) => ({
+    filename,
+    mimeType,
+    body: { data: b64url(bytes), size: Buffer.isBuffer(bytes) ? bytes.length : bytes.length },
+  });
+  const fakeGmail = (payload: unknown) =>
+    ({
+      users: {
+        messages: {
+          get: vi.fn().mockResolvedValue({
+            data: {
+              id: "m2",
+              threadId: "t2",
+              labelIds: ["INBOX"],
+              internalDate: "1750000000000",
+              snippet: "hello",
+              payload,
+            },
+          }),
+          attachments: {
+            get: vi.fn().mockResolvedValue({ data: { data: b64url("hello world") } }),
+          },
+        },
+      },
+    }) as any;
+
+  it("inline small.pdf (no attachmentId) is parsed with the REAL pdf pipeline — never an empty array", async () => {
+    const { buildItineraryPdf } = await import("./pdfTestFixture");
+    const payload = {
+      parts: [
+        { mimeType: "text/plain", body: { data: b64url("body text") } },
+        inlinePart("small.pdf", "application/pdf", buildItineraryPdf()),
+      ],
+    };
+    const [msg] = await listMessagesByIds(fakeGmail(payload), ["m2"]);
+    expect(msg.attachments).toHaveLength(1);
+    expect(msg.attachments[0].filename).toBe("small.pdf");
+    expect(msg.attachments[0].parseStatus).toBe("ok");
+    expect(msg.attachments[0].text).toContain("PACKGO PARSER FIXTURE");
+  });
+
+  it("inline image goes through vision OCR like any other image attachment", async () => {
+    const png = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+    const payload = { parts: [inlinePart("poster.png", "image/png", png)] };
+    const [msg] = await listMessagesByIds(fakeGmail(payload), ["m2"]);
+    expect(msg.attachments).toHaveLength(1);
+    expect(msg.attachments[0].parseStatus).toBe("ok");
+    expect(msg.attachments[0].text).toContain("mock OCR");
+  });
+
+  it("mixed attachmentId + inline parts share the 5-cap; overflow keeps not_processed sentinels", async () => {
+    const payload = {
+      parts: [
+        idPart(1),
+        idPart(2),
+        idPart(3),
+        inlinePart("in1.txt", "text/plain", "inline one content"),
+        inlinePart("in2.txt", "text/plain", "inline two content"),
+        inlinePart("in3.txt", "text/plain", "inline three content"),
+        idPart(4),
+      ],
+    };
+    const [msg] = await listMessagesByIds(fakeGmail(payload), ["m2"]);
+    expect(msg.attachments).toHaveLength(7);
+    expect(msg.attachments.filter((a) => a.parseStatus === "ok")).toHaveLength(5);
+    const sentinels = msg.attachments.filter((a) => a.parseStatus === "not_processed");
+    expect(sentinels.map((s) => s.filename)).toEqual(["in3.txt", "byid4.txt"]);
+  });
+
+  it("hydration-failure sentinels list inline parts too", () => {
+    const evilInline = inlinePart("in.pdf", "application/pdf", "x");
+    const s = buildHydrationFailureSentinels(
+      { parts: [idPart(1), evilInline] },
+      new Error("hydration died"),
+    );
+    expect(s.map((x) => x.filename)).toEqual(["byid1.txt", "in.pdf"]);
+    expect(s.every((x) => x.parseStatus === "not_processed")).toBe(true);
+  });
+
+  it("nameless attachmentId part ('noname' attachment, Content-Disposition: attachment) is still collected — never attachment-free (batch-3 adversarial)", async () => {
+    const payload = {
+      parts: [
+        { mimeType: "text/plain", body: { data: b64url("body") } },
+        // Content-Disposition: attachment without a filename param —
+        // Gmail stores it with an attachmentId but filename "". The
+        // disposition header IS the identity (Codex 17:40 P1-1).
+        {
+          filename: "",
+          mimeType: "application/pdf",
+          headers: [{ name: "Content-Disposition", value: "attachment" }],
+          body: { attachmentId: "att-x", size: 99 },
+        },
+      ],
+    };
+    const gmail = fakeGmail(payload);
+    const { buildItineraryPdf } = await import("./pdfTestFixture");
+    gmail.users.messages.attachments.get.mockResolvedValue({
+      data: { data: b64url(buildItineraryPdf()) },
+    });
+    const [msg] = await listMessagesByIds(gmail, ["m2"]);
+    expect(msg.attachments).toHaveLength(1);
+    expect(msg.attachments[0].filename).toContain("未命名附件");
+    expect(msg.attachments[0].parseStatus).toBe("ok");
+  });
+
+  it("nameless inline application/pdf with attachment disposition is collected; nameless text/calendar is NOT (invite furniture, even with attachment disposition)", async () => {
+    const { buildItineraryPdf } = await import("./pdfTestFixture");
+    const payload = {
+      parts: [
+        {
+          filename: "",
+          mimeType: "application/pdf",
+          headers: [{ name: "Content-Disposition", value: "attachment" }],
+          body: { data: b64url(buildItineraryPdf()), size: 500 },
+        },
+        {
+          filename: "",
+          mimeType: "text/calendar",
+          headers: [{ name: "Content-Disposition", value: "attachment" }],
+          body: { data: b64url("BEGIN:VCALENDAR"), size: 20 },
+        },
+      ],
+    };
+    const [msg] = await listMessagesByIds(fakeGmail(payload), ["m2"]);
+    expect(msg.attachments).toHaveLength(1);
+    expect(msg.attachments[0].mimeType).toBe("application/pdf");
+    expect(msg.attachments[0].parseStatus).toBe("ok");
+  });
+
+  it("fetchRawAttachments returns inline bytes for the receipt path", async () => {
+    const pdfBytes = Buffer.from("%PDF-1.4 tiny receipt fixture bytes", "latin1");
+    const payload = { parts: [inlinePart("receipt.pdf", "application/pdf", pdfBytes)] };
+    const raws = await fetchRawAttachments(fakeGmail(payload), "m2");
+    expect(raws).toHaveLength(1);
+    expect(raws[0].filename).toBe("receipt.pdf");
+    expect(raws[0].bytes.equals(pdfBytes)).toBe(true);
+  });
+});
+
+// ──────────────────────────────────────────────────────────────────────
+// Attachment IDENTITY vs bytes LOCATION (Codex 17:40 P1-1): identity =
+// non-empty filename OR Content-Disposition: attachment; attachmentId only
+// says where the bytes live. The old collector both LOST attachments
+// (named zero-byte → vanished → reply gate no-ops) and INVENTED them
+// (externalized text/plain body → "attachment"). These fixtures are the
+// real MIME shapes from the adversarial replay.
+// ──────────────────────────────────────────────────────────────────────
+
+describe("attachment identity vs bytes location (Codex 17:40 P1-1)", () => {
+  const b64url = (s: Buffer | string) =>
+    (Buffer.isBuffer(s) ? s : Buffer.from(s, "utf-8"))
+      .toString("base64")
+      .replace(/\+/g, "-")
+      .replace(/\//g, "_");
+  const fakeGmail = (payload: unknown) =>
+    ({
+      users: {
+        messages: {
+          get: vi.fn().mockResolvedValue({
+            data: {
+              id: "m3",
+              threadId: "t3",
+              labelIds: ["INBOX"],
+              internalDate: "1750000000000",
+              snippet: "",
+              payload,
+            },
+          }),
+          attachments: {
+            get: vi.fn().mockResolvedValue({ data: { data: b64url("attached text bytes") } }),
+          },
+        },
+      },
+    }) as any;
+
+  it("named zero-byte attachment (data:'', size 0) keeps its existence — parseStatus 'empty', never attachments=[]", async () => {
+    const payload = {
+      parts: [
+        { mimeType: "text/plain", body: { data: b64url("body text") } },
+        { filename: "a.pdf", mimeType: "application/pdf", body: { data: "", size: 0 } },
+      ],
+    };
+    const [msg] = await listMessagesByIds(fakeGmail(payload), ["m3"]);
+    expect(msg.attachments).toHaveLength(1);
+    expect(msg.attachments[0].filename).toBe("a.pdf");
+    expect(msg.attachments[0].parseStatus).toBe("empty");
+  });
+
+  it("named attachment with NO bytes anywhere (no attachmentId, no data) still yields an 'empty' ref", async () => {
+    const payload = {
+      parts: [{ filename: "ghost.pdf", mimeType: "application/pdf", body: { size: 0 } }],
+    };
+    const [msg] = await listMessagesByIds(fakeGmail(payload), ["m3"]);
+    expect(msg.attachments).toHaveLength(1);
+    expect(msg.attachments[0].parseStatus).toBe("empty");
+  });
+
+  it("nameless Content-Disposition: attachment octet/text parts ARE collected (real 'noname' attachments)", async () => {
+    const payload = {
+      parts: [
+        {
+          filename: "",
+          mimeType: "application/octet-stream",
+          headers: [{ name: "Content-Disposition", value: "attachment" }],
+          body: { attachmentId: "att-oct", size: 19 },
+        },
+        {
+          filename: "",
+          mimeType: "text/plain",
+          headers: [{ name: "Content-Disposition", value: "attachment" }],
+          body: { attachmentId: "att-txt", size: 19 },
+        },
+      ],
+    };
+    const [msg] = await listMessagesByIds(fakeGmail(payload), ["m3"]);
+    expect(msg.attachments).toHaveLength(2);
+    expect(msg.attachments.every((a) => a.filename.includes("未命名附件"))).toBe(true);
+  });
+
+  it("externalized text/plain BODY (attachmentId, nameless, no disposition) is NOT an attachment", async () => {
+    const payload = {
+      parts: [
+        // Large message bodies get externalized: bytes behind an
+        // attachmentId even though the part is the email's own body.
+        { filename: "", mimeType: "text/plain", body: { attachmentId: "body-ext", size: 90000 } },
+      ],
+    };
+    const [msg] = await listMessagesByIds(fakeGmail(payload), ["m3"]);
+    expect(msg.attachments).toHaveLength(0);
+  });
+
+  it("nameless CID inline logo (Content-Disposition: inline) is NOT an attachment", async () => {
+    const png = Buffer.from([0x89, 0x50, 0x4e, 0x47]);
+    const payload = {
+      parts: [
+        {
+          filename: "",
+          mimeType: "image/png",
+          headers: [
+            { name: "Content-ID", value: "<logo@corp>" },
+            { name: "Content-Disposition", value: "inline" },
+          ],
+          body: { data: b64url(png), size: png.length },
+        },
+      ],
+    };
+    const [msg] = await listMessagesByIds(fakeGmail(payload), ["m3"]);
+    expect(msg.attachments).toHaveLength(0);
+  });
+
+  it("nameless protocol parts (pkcs7 signature) stay out even with an attachment disposition; a NAMED .ics is collected", async () => {
+    const payload = {
+      parts: [
+        {
+          filename: "",
+          mimeType: "application/pkcs7-signature",
+          headers: [{ name: "Content-Disposition", value: "attachment" }],
+          body: { attachmentId: "att-sig", size: 256 },
+        },
+        {
+          filename: "invite.ics",
+          mimeType: "text/calendar",
+          body: { attachmentId: "att-ics", size: 40 },
+        },
+      ],
+    };
+    const [msg] = await listMessagesByIds(fakeGmail(payload), ["m3"]);
+    expect(msg.attachments).toHaveLength(1);
+    expect(msg.attachments[0].filename).toBe("invite.ics");
+  });
+
+  it("header name/value casing does not matter: CONTENT-DISPOSITION: ATTACHMENT collects", async () => {
+    const payload = {
+      parts: [
+        {
+          filename: "",
+          mimeType: "text/plain",
+          headers: [{ name: "CONTENT-DISPOSITION", value: "ATTACHMENT; FILENAME=x" }],
+          body: { attachmentId: "att-case", size: 19 },
+        },
+      ],
+    };
+    const [msg] = await listMessagesByIds(fakeGmail(payload), ["m3"]);
+    expect(msg.attachments).toHaveLength(1);
+    expect(msg.attachments[0].filename).toContain("未命名附件");
+  });
+});
+
+// red-team v4 collector edge shapes (adversarially verified findings)
+describe("collector edge shapes (red-team v4)", () => {
+  const b64url = (s: Buffer | string) =>
+    (Buffer.isBuffer(s) ? s : Buffer.from(s, "utf-8"))
+      .toString("base64")
+      .replace(/\+/g, "-")
+      .replace(/\//g, "_");
+  const fakeGmail = (payload: unknown) =>
+    ({
+      users: {
+        messages: {
+          get: vi.fn().mockResolvedValue({
+            data: { id: "m4", threadId: "t4", labelIds: ["INBOX"], internalDate: "1750000000000", snippet: "", payload },
+          }),
+          attachments: {
+            get: vi.fn().mockResolvedValue({ data: { data: b64url("attached bytes") } }),
+          },
+        },
+      },
+    }) as any;
+
+  it("quoted disposition token ('\"attachment\"; …' from buggy mailers) still counts as identity", async () => {
+    const payload = {
+      parts: [
+        {
+          filename: "",
+          mimeType: "application/pdf",
+          headers: [{ name: "Content-Disposition", value: '"attachment"; filename="quote.pdf"' }],
+          body: { attachmentId: "att-q", size: 900 },
+        },
+      ],
+    };
+    const [msg] = await listMessagesByIds(fakeGmail(payload), ["m4"]);
+    expect(msg.attachments).toHaveLength(1);
+  });
+
+  it("whitespace-only filename (sender-set name='   ') is identity — existence preserved with fallback display name", async () => {
+    const payload = {
+      parts: [
+        { filename: "   ", mimeType: "application/pdf", body: { attachmentId: "att-ws", size: 55000 } },
+        // control: filename "" (Gmail's non-attachment marker) with no CD stays out
+        { filename: "", mimeType: "text/plain", body: { attachmentId: "body-ext2", size: 90000 } },
+      ],
+    };
+    const [msg] = await listMessagesByIds(fakeGmail(payload), ["m4"]);
+    expect(msg.attachments).toHaveLength(1);
+    expect(msg.attachments[0].filename).toContain("未命名附件");
   });
 });

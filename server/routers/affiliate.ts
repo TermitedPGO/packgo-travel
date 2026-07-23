@@ -1,16 +1,16 @@
 /**
- * Affiliate (Trip.com) router — public link generation + click tracking +
- * admin stats + price-comparison data.
+ * Affiliate (Trip.com) router — admin stats + price-comparison data only.
  *
- * Extracted from server/routers.ts (Phase 4E · sub-PR 5 of 5) on
- * 2026-05-19 as part of the routers.ts split (audit P0-1). Source range
- * (verbatim from origin): L4113-4248.
+ * Phase 1 is homepage-only clickout. The public link generation and click tracking
+ * that used to live here were removed: redirect + best-effort telemetry now happen in
+ * ONE first-party server endpoint, GET /go/trip/:source (see server/services/tripRedirect
+ * and _core/index.ts). There is deliberately no public generateAffiliateLink query and
+ * no public trackClick mutation — nothing lets the browser rebuild a target URL or
+ * supply a raw referrer/route/city/tourId.
  *
- * Procedures (8):
- *   - generateAffiliateLink   – public: build Trip.com flights/hotels/home link
- *   - trackClick              – public: log click into affiliate_clicks
+ * Remaining procedures (6):
  *   - getStats                – admin: aggregate stats over N days
- *   - getClicks               – admin: paginated raw click feed
+ *   - getClicks               – admin: paginated raw redirect-telemetry feed
  *   - upsertPriceComparison   – admin: tour price comparison row write
  *   - getPriceComparisons     – admin: list all price comparisons
  *   - deletePriceComparison   – admin: remove a price comparison row
@@ -20,89 +20,8 @@
 import { z } from "zod";
 import { publicProcedure, adminProcedure, router } from "../_core/trpc";
 import * as db from "../db";
-import {
-  generateFlightLink,
-  generateHotelLink,
-  generateHomepageLink,
-  trackAffiliateClick,
-} from "../services/affiliateLinkService";
 
 export const affiliateRouter = router({
-    generateAffiliateLink: publicProcedure
-      .input(z.object({
-        type: z.enum(["flights", "hotels", "homepage"]),
-        // Flight params
-        origin: z.string().optional(),
-        destination: z.string().optional(),
-        departDate: z.string().optional(),
-        returnDate: z.string().optional(),
-        adults: z.number().min(1).max(9).optional(),
-        children: z.number().min(0).max(9).optional(),
-        infants: z.number().min(0).max(9).optional(),
-        cabinClass: z.enum(['economy', 'premiumEconomy', 'business', 'first']).optional(),
-        // Hotel params
-        city: z.string().optional(),
-        checkIn: z.string().optional(),
-        checkOut: z.string().optional(),
-        rooms: z.number().min(1).max(8).optional(),
-        hotelAdults: z.number().min(1).max(6).optional(),
-        hotelChildren: z.number().min(0).max(4).optional(),
-        // Common
-        ouid: z.string().optional(),
-      }))
-      .query(({ input }) => {
-        let url: string;
-        if (input.type === "flights") {
-          url = generateFlightLink({
-            origin: input.origin,
-            destination: input.destination,
-            departDate: input.departDate,
-            returnDate: input.returnDate,
-            ouid: input.ouid,
-            adults: input.adults,
-            children: input.children,
-            infants: input.infants,
-            cabinClass: input.cabinClass,
-          });
-        } else if (input.type === "hotels") {
-          url = generateHotelLink({
-            city: input.city,
-            checkIn: input.checkIn,
-            checkOut: input.checkOut,
-            ouid: input.ouid,
-            rooms: input.rooms,
-            adults: input.hotelAdults,
-            children: input.hotelChildren,
-          });
-        } else {
-          url = generateHomepageLink(input.ouid);
-        }
-        return { url };
-      }),
-
-    trackClick: publicProcedure
-      .input(z.object({
-        platform: z.enum(["trip_flights", "trip_hotels", "trip_homepage"]),
-        targetUrl: z.string(),
-        referrerPage: z.string().optional(),
-        tourId: z.number().optional(),
-      }))
-      .mutation(async ({ input, ctx }) => {
-        const req = (ctx as any).req;
-        const ipAddress = req?.ip ?? req?.headers?.["x-forwarded-for"] ?? null;
-        const userAgent = req?.headers?.["user-agent"] ?? null;
-        await trackAffiliateClick({
-          userId: ctx.user?.id,
-          platform: input.platform,
-          targetUrl: input.targetUrl,
-          referrerPage: input.referrerPage,
-          tourId: input.tourId,
-          ipAddress: typeof ipAddress === "string" ? ipAddress : undefined,
-          userAgent: typeof userAgent === "string" ? userAgent : undefined,
-        });
-        return { success: true };
-      }),
-
     getStats: adminProcedure
       .input(z.object({ days: z.number().default(30) }))
       .query(async ({ input }) => {

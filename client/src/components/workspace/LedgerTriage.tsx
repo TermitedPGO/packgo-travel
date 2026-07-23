@@ -37,17 +37,31 @@ export default function LedgerTriage() {
 
   const all = (txQ.data?.items ?? []) as Txn[];
   const cards = all.filter(needsTriage);
+  // 1A0a(Codex 7-18 P1-3):未取得 → 副標顯「–」,不在 loading/error 上方先報 0。
+  const nDisplay = txQ.data === undefined ? "–" : String(cards.length);
 
   return (
     <div className="space-y-3">
       <p className="text-[11px] text-gray-500">
-        {t("workspace.ldgTriageSub", { n: cards.length })}
+        {t("workspace.ldgTriageSub", { n: nDisplay })}
       </p>
 
       {txQ.isLoading && (
         <p className="text-xs text-gray-400 py-4">{t("workspace.loading")}</p>
       )}
-      {!txQ.isLoading && cards.length === 0 && (
+      {/* 1A0a:讀取失敗 ≠ 全部處理完 */}
+      {!txQ.isLoading && txQ.isError && txQ.data === undefined && (
+        <div className="rounded-xl border border-amber-200 bg-amber-50 p-6 text-center text-xs text-amber-700">
+          {t("workspace.ldgLoadFailed")}
+        </div>
+      )}
+      {/* cached refetch 失敗 = stale,不得顯「沒有待分類」(Codex 7-18 P1-6) */}
+      {!txQ.isLoading && txQ.isError && txQ.data !== undefined && (
+        <div className="rounded-xl border border-amber-200 bg-amber-50 p-3 text-center text-xs text-amber-700">
+          {t("workspace.ldgStaleNotice")}
+        </div>
+      )}
+      {!txQ.isLoading && !txQ.isError && cards.length === 0 && (
         <div className="rounded-xl border border-gray-200 bg-white p-6 text-center text-xs text-gray-400">
           {t("workspace.ldgTriageEmpty")}
         </div>

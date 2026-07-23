@@ -15,7 +15,6 @@
  */
 import { useMemo, useState } from "react";
 import { trpc } from "@/lib/trpc";
-import { Button } from "@/components/ui/button";
 import {
   Select,
   SelectContent,
@@ -23,18 +22,15 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { toast } from "sonner";
 import {
   Wallet,
   TrendingUp,
   DollarSign,
   Landmark,
-  ArrowDownToLine,
   ArrowLeftRight,
   Lock,
   AlertTriangle,
   EyeOff,
-  Loader2,
 } from "lucide-react";
 import { KpiCard, SectionCard, LandingGreeting } from "@/components/admin/landings/landingPrimitives";
 import { useLocale } from "@/contexts/LocaleContext";
@@ -148,21 +144,9 @@ export default function ProfitLossV2() {
     { refetchInterval: 120_000 },
   );
 
-  const exportMutation = trpc.plaid.yearEndExport.useMutation({
-    onSuccess: (data) => {
-      toast.success(
-        t("admin.profitLoss.downloadReady", {
-          year: String(data.year),
-          count: String(data.fileCounts.transactions),
-        }),
-      );
-      // User-initiated download — open the R2 ZIP in a new tab.
-      window.open(data.url, "_blank", "noopener,noreferrer");
-    },
-    onError: (err) => {
-      toast.error(t("admin.profitLoss.downloadFailed", { msg: err.message }));
-    },
-  });
+  // 1A0a(plan v4.3 §4.2 E1):yearEndExport mutation 與下載鈕撤除 —— 年終 ZIP
+  // 口徑未收斂(payout 雙計/零遞延/userId 漏 trust 帳),CPA-ready 宣稱不成立;
+  // server procedure 由 1A0b 封鎖。
 
   const r = report.data;
 
@@ -182,8 +166,11 @@ export default function ProfitLossV2() {
     return out;
   }, [now]);
 
-  const bookingIncome = r?.income.byCategory.income_booking ?? 0;
-  const net = r?.netProfit ?? 0;
+  // 1A0a:無 data 一律 null(顯示「—」/錯誤態),不折 0
+  const net = r !== undefined ? r.netProfit : null;
+  const loadFailed = report.isError && r === undefined;
+  // cached refetch 失敗 = stale(顯舊值+標記,Codex 7-18 P1-6)
+  const stale = report.isError && r !== undefined;
 
   return (
     <div className="max-w-5xl mx-auto space-y-4">
@@ -192,7 +179,7 @@ export default function ProfitLossV2() {
         title={t("admin.profitLoss.title")}
         subtitle={t("admin.profitLoss.subtitle", {
           period: `${startDate} → ${endDate}`,
-          net: fmt(net),
+          net: net !== null ? fmt(net) : "—",
         })}
       />
 
@@ -252,29 +239,31 @@ export default function ProfitLossV2() {
           </Select>
         )}
 
-        <div className="ml-auto">
-          <Button
-            size="sm"
-            className="rounded-lg bg-teal-600 hover:bg-teal-700 text-white text-xs"
-            disabled={exportMutation.isPending}
-            onClick={() => exportMutation.mutate({ year })}
-          >
-            {exportMutation.isPending ? (
-              <Loader2 className="w-3.5 h-3.5 mr-1.5 animate-spin" />
-            ) : (
-              <ArrowDownToLine className="w-3.5 h-3.5 mr-1.5" />
-            )}
-            {t("admin.profitLoss.downloadZip", { year: String(year) })}
-          </Button>
+        {/* 1A0a:年度報稅包 ZIP 下載鈕撤除(口徑收斂前停用,§4.2 E1) */}
+        <div className="ml-auto text-[11px] text-foreground/40">
+          {t("admin.profitLoss.exportBlocked")}
         </div>
       </div>
 
+      {/* 1A0a:讀取失敗且無快取值 → 顯性錯誤,不渲染 $0 KPI(U4);stale 標記 */}
+      {loadFailed && (
+        <div className="rounded-xl border border-amber-200 bg-amber-50 p-4 text-xs text-amber-700">
+          {t("admin.profitLoss.loadFailed")}
+        </div>
+      )}
+      {stale && (
+        <div className="rounded-xl border border-amber-200 bg-amber-50 p-3 text-xs text-amber-700">
+          {t("financeCockpit.truth.staleHint")}
+        </div>
+      )}
+
       {/* ── KPI strip ── */}
+      {!loadFailed && (
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
         <KpiCard
           icon={Wallet}
           label={t("admin.profitLoss.netRevenue")}
-          primary={fmt(r?.income.total ?? 0)}
+          primary={r !== undefined ? fmt(r.income.total) : "—"}
           secondary={t("admin.profitLoss.netRevenueNote")}
           accent="emerald"
           loading={report.isLoading}
@@ -282,7 +271,7 @@ export default function ProfitLossV2() {
         <KpiCard
           icon={TrendingUp}
           label={t("admin.profitLoss.grossProfit")}
-          primary={fmt(r?.grossProfit ?? 0)}
+          primary={r !== undefined ? fmt(r.grossProfit) : "—"}
           secondary={t("admin.profitLoss.grossProfitNote")}
           accent="sky"
           loading={report.isLoading}
@@ -290,31 +279,35 @@ export default function ProfitLossV2() {
         <KpiCard
           icon={DollarSign}
           label={t("admin.profitLoss.netProfit")}
-          primary={fmt(net)}
+          primary={net !== null ? fmt(net) : "—"}
           secondary={
-            net >= 0
-              ? t("admin.profitLoss.marginLabel", {
-                  pct: String(Math.round(r?.profitMargin ?? 0)),
-                })
-              : t("admin.profitLoss.atLoss")
+            net === null
+              ? "—"
+              : net >= 0
+                ? t("admin.profitLoss.marginLabel", {
+                    pct: String(Math.round(r !== undefined ? r.profitMargin : 0)),
+                  })
+                : t("admin.profitLoss.atLoss")
           }
-          accent={net >= 0 ? "emerald" : "rose"}
-          trend={net >= 0 ? "up" : "down"}
+          accent={net !== null && net < 0 ? "rose" : "emerald"}
+          trend={net !== null && net < 0 ? "down" : "up"}
           loading={report.isLoading}
         />
         <KpiCard
           icon={Landmark}
           label={t("admin.profitLoss.ownerCapital")}
-          primary={fmtSigned(r?.transfer.total ?? 0)}
+          primary={r !== undefined ? fmtSigned(r.transfer.total) : "—"}
           secondary={t("admin.profitLoss.ownerCapitalNote", {
-            count: String(r?.transfer.count ?? 0),
+            count: r !== undefined ? String(r.transfer.count) : "—",
           })}
           accent="slate"
           loading={report.isLoading}
         />
       </div>
+      )}
 
       {/* ── P&L statement ── */}
+      {!loadFailed && (
       <SectionCard
         title={t("admin.profitLoss.statementTitle")}
         icon={DollarSign}
@@ -330,7 +323,7 @@ export default function ProfitLossV2() {
           </div>
         ) : (
           <div className="divide-y-0">
-            <PLRow label={t("admin.profitLoss.bookingIncome")} value={bookingIncome} kind="add" />
+            <PLRow label={t("admin.profitLoss.bookingIncome")} value={r.income.byCategory.income_booking} kind="add" />
             {r.refunds !== 0 && (
               <PLRow label={t("admin.profitLoss.refundsLine")} value={r.refunds} kind="less" />
             )}
@@ -357,10 +350,11 @@ export default function ProfitLossV2() {
               />
             ))}
 
-            <PLRow label={t("admin.profitLoss.netProfitLine")} value={net} kind="total" />
+            <PLRow label={t("admin.profitLoss.netProfitLine")} value={r.netProfit} kind="total" />
           </div>
         )}
       </SectionCard>
+      )}
 
       {/* ── Excluded-from-profit callout (transfer / trust / review / excluded) ── */}
       {r && (
@@ -408,10 +402,11 @@ export default function ProfitLossV2() {
                 {t("admin.profitLoss.squarePayoutTile")}
               </div>
               <div className="mt-1 text-base font-bold tabular-nums text-foreground">
-                {fmtSigned(r.squarePayout?.total ?? 0)}
+                {fmtSigned(r.squarePayout ? r.squarePayout.total : 0)}
               </div>
               <div className="text-[11px] text-foreground/45">
-                {t("admin.profitLoss.squarePayoutDesc", { count: String(r.squarePayout?.count ?? 0) })}
+                {/* squarePayout 欄位缺席=真零(成功回應的 optional bucket),非錯誤折疊 */}
+                {t("admin.profitLoss.squarePayoutDesc", { count: String(r.squarePayout ? r.squarePayout.count : 0) })}
               </div>
             </div>
 

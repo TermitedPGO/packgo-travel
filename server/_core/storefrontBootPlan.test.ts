@@ -66,7 +66,9 @@ describe("buildStorefrontBootPlan — 預設從 STOREFRONT_MODE 旗標讀", () =
 });
 
 describe("BACKEND_ONLY_ENDPOINTS — 後台端點清單(文件化 + 防漂移)", () => {
-  it("涵蓋三支 webhook + Gmail OAuth + OpsAgent SSE + 全部 script-token 端點", () => {
+  // R6-2 P2-2 誠實更正:本測試是「抽樣 + 與 index.ts 實際註冊對帳」,不是逐條
+  // 全列;真正的全量防漂移靠下面的 backendPost 對帳測試。標題不再宣稱全部。
+  it("涵蓋三支 webhook + Gmail OAuth + OpsAgent SSE + script-token 端點抽樣", () => {
     // 三支 webhook
     expect(BACKEND_ONLY_ENDPOINTS).toContain("POST /api/stripe/webhook");
     expect(BACKEND_ONLY_ENDPOINTS).toContain("POST /api/plaid/webhook");
@@ -81,6 +83,30 @@ describe("BACKEND_ONLY_ENDPOINTS — 後台端點清單(文件化 + 防漂移)",
     expect(BACKEND_ONLY_ENDPOINTS).toContain("POST /api/admin/catalog-rebuild");
     expect(BACKEND_ONLY_ENDPOINTS).toContain("POST /api/admin/import-case-file");
     expect(BACKEND_ONLY_ENDPOINTS).toContain("POST /api/admin/imessage-ingest");
+    // audit-chain-repair R6-2:鏈錨定端點必須在清單(storefront gate 之內)
+    expect(BACKEND_ONLY_ENDPOINTS).toContain("POST /api/admin/audit-chain-epoch");
+  });
+
+  it("與 index.ts 實際 backendPost/backendGet/backendAll 註冊對帳(全量防漂移)", async () => {
+    // 清單宣稱「文件化 + 測試釘住」,那就真的逐條對:index.ts 原始碼中每個
+    // backendPost("/api/…") 註冊路徑都必須出現在清單;清單多列或漏列都紅。
+    const { readFileSync } = await import("node:fs");
+    const { join } = await import("node:path");
+    const src = readFileSync(join(process.cwd(), "server/_core/index.ts"), "utf8");
+    const registered = new Set<string>();
+    for (const m of src.matchAll(/backend(Post|Get|All)\(\s*\n?\s*"(\/api\/[^"]+)"/g)) {
+      const verb = m[1] === "Post" ? "POST" : m[1] === "Get" ? "GET" : "ALL";
+      registered.add(`${verb} ${m[2]}`);
+    }
+    const listed = new Set(
+      BACKEND_ONLY_ENDPOINTS.filter((e) => /^(POST|GET|ALL) \/api\//.test(e)),
+    );
+    // R7-3:雙向 set equality —— 清單漏列(missing)與清單殘留不存在的端點
+    // (extra)都要紅,不是單向包含。
+    const missing = [...registered].filter((r) => !listed.has(r));
+    const extra = [...listed].filter((l) => !registered.has(l));
+    expect(missing).toEqual([]);
+    expect(extra).toEqual([]);
   });
 
   it("全部條目唯一(沒有重複登記)", () => {

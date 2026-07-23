@@ -8,7 +8,7 @@
 import { trpc } from "@/lib/trpc";
 import { Check, Info, ShieldCheck } from "lucide-react";
 import { useLocale } from "@/contexts/LocaleContext";
-import { fmtMoney, dateOnlyClient } from "./cockpitMath";
+import { fmtMoney, dateOnlyClient, toNum } from "./cockpitMath";
 
 function fmtShortDate(d: string | Date | null): string {
   const s = dateOnlyClient(d);
@@ -23,7 +23,10 @@ export function AutoHandledCard({ onOpenRecon }: { onOpenRecon: () => void }) {
   );
 
   const items = auto.data?.items ?? [];
-  const summary = auto.data?.summary ?? { count: 0, totalAmount: 0 };
+  // 1A0a(Codex 7-18 P2-4):未知態(loading/cold error)不得先報真零 —— header
+  // 計數只在有 data 時顯示數字,否則「—」;stale(留舊值的 refetch 失敗)標記。
+  const summary = auto.data?.summary ?? null;
+  const stale = auto.isError && auto.data !== undefined;
 
   return (
     <div className="overflow-hidden rounded-xl border border-gray-200 bg-white">
@@ -33,7 +36,11 @@ export function AutoHandledCard({ onOpenRecon }: { onOpenRecon: () => void }) {
           {t("financeCockpit.work.autoCardTitle")}
         </div>
         <div className="text-[11px] text-gray-500">
-          {t("financeCockpit.work.autoCardMeta", { count: String(summary.count) })}
+          {stale
+            ? t("financeCockpit.truth.staleHint")
+            : t("financeCockpit.work.autoCardMeta", {
+                count: summary !== null ? String(summary.count) : "—",
+              })}
         </div>
       </div>
 
@@ -43,20 +50,20 @@ export function AutoHandledCard({ onOpenRecon }: { onOpenRecon: () => void }) {
             <div key={i} className="h-9 border-b border-gray-50 bg-gray-50/40 last:border-0" />
           ))}
         </div>
-      ) : auto.isError ? (
+      ) : auto.isError && auto.data === undefined ? (
         <div className="px-4 py-6 text-center text-xs text-gray-400">
           {t("financeCockpit.truth.loadError")}
         </div>
       ) : (
-        <>
-          {/* 摘要行(B-final .autosum) */}
+        <div className={stale ? "opacity-60" : ""}>
+          {/* 摘要行(B-final .autosum);此分支 data 必在(cold error 已擋) */}
           <div className="flex items-start gap-2 border-b border-gray-100 bg-gray-50 px-4 py-3 text-xs leading-relaxed text-gray-600">
             <Check className="mt-0.5 h-[15px] w-[15px] flex-shrink-0 text-emerald-700" />
             <span>
-              {summary.count > 0
+              {summary !== null && summary.count > 0
                 ? t("financeCockpit.work.autoSummary", {
-                    count: String(summary.count),
-                    amount: fmtMoney(summary.totalAmount),
+                    count: String(summary?.count ?? 0),
+                    amount: fmtMoney(summary?.totalAmount ?? 0),
                   })
                 : t("financeCockpit.work.autoSummaryEmpty")}
             </span>
@@ -89,11 +96,15 @@ export function AutoHandledCard({ onOpenRecon }: { onOpenRecon: () => void }) {
                 {row.matchMethod}
               </span>
               <span className="flex-shrink-0 font-medium text-gray-500 tabular-nums">
-                {fmtMoney(parseFloat(String(row.amountAllocated)) || 0)}
+                {(() => {
+                  // 1A0a U8:爛值不折 0,顯示「—」
+                  const a = toNum(row.amountAllocated);
+                  return a !== null ? fmtMoney(a) : "—";
+                })()}
               </span>
             </div>
           ))}
-        </>
+        </div>
       )}
 
       {/* note + 對帳明細入口(撤銷 unlink 的 UI 掛在明細層) */}

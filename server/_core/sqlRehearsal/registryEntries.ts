@@ -1093,7 +1093,7 @@ export const ENTRIES: RehearsalEntry[] = [
   },
   {
     key: "gmailPipeline.recentInteractionsByProfile",
-    sources: ["server/agents/autonomous/gmailPipeline.ts:1010"],
+    sources: ["server/agents/autonomous/gmailPipeline.ts:1011"],
     cls: "B",
     sql: "SELECT *\nFROM `customerInteractions`\nWHERE `customerInteractions`.`customerProfileId` = ?\nORDER BY `customerInteractions`.`createdAt` DESC\nLIMIT ?",
     sampleParams: [1,1],
@@ -1102,7 +1102,7 @@ export const ENTRIES: RehearsalEntry[] = [
   },
   {
     key: "gmailPipeline.todaysAutoSentCount",
-    sources: ["server/agents/autonomous/gmailPipeline.ts:1438", "server/agents/autonomous/gmailPipeline.ts:1444"],
+    sources: ["server/agents/autonomous/gmailPipeline.ts:1475", "server/agents/autonomous/gmailPipeline.ts:1481"],
     cls: "B",
     sql: "SELECT COUNT(*) AS c\nFROM `interactionOutcomes`\nWHERE `interactionOutcomes`.`agentName` = ?\n  AND `interactionOutcomes`.`actionTaken` = ?\n  AND DATE(`interactionOutcomes`.`createdAt`) = CURDATE()",
     sampleParams: ["x","x"],
@@ -1624,7 +1624,7 @@ export const ENTRIES: RehearsalEntry[] = [
   },
   {
     key: "stripeWebhook.handleChargeRefunded.packpointEarnLookup",
-    sources: ["server/_core/stripeWebhook.ts:950"],
+    sources: ["server/_core/stripeWebhook.ts:951"],
     cls: "B",
     sql: "select `pointsTransactions`.`delta` from `pointsTransactions` where (`pointsTransactions`.`referenceType` = 'booking' AND `pointsTransactions`.`referenceId` = ? AND `pointsTransactions`.`reason` = 'booking_earn') limit 1",
     sampleParams: [1],
@@ -1633,7 +1633,7 @@ export const ENTRIES: RehearsalEntry[] = [
   },
   {
     key: "repurchaseCta.maybeAppendUpgradeCta.bumpInquiryCount",
-    sources: ["server/_core/repurchaseCta.ts:73"],
+    sources: ["server/_core/repurchaseCta.ts:86"],
     cls: "B",
     sql: "update `users` set `inquiryCount` = `inquiryCount` + 1, `lastInquiryAt` = ? where `users`.`id` = ?",
     sampleParams: ["2026-01-01 00:00:00",1],
@@ -1695,7 +1695,7 @@ export const ENTRIES: RehearsalEntry[] = [
   },
   {
     key: "backfill-passport-encryption.processBookingParticipantsBatch.findPlaintext",
-    sources: ["server/scripts/backfill-passport-encryption.ts:76"],
+    sources: ["server/scripts/backfill-passport-encryption.ts:72"],
     cls: "B",
     sql: "select `bookingParticipants`.`id`, `bookingParticipants`.`passportNumber` from `bookingParticipants` where (`bookingParticipants`.`passportNumber` IS NOT NULL AND `bookingParticipants`.`passportNumber` NOT LIKE 'enc:v1:%') order by `bookingParticipants`.`id` asc limit 100",
     sampleParams: [],
@@ -1704,7 +1704,7 @@ export const ENTRIES: RehearsalEntry[] = [
   },
   {
     key: "backfill-passport-encryption.processVisaApplicationsBatch.findPlaintext",
-    sources: ["server/scripts/backfill-passport-encryption.ts:107"],
+    sources: ["server/scripts/backfill-passport-encryption.ts:103"],
     cls: "B",
     sql: "select `visaApplications`.`id`, `visaApplications`.`passportNumber` from `visaApplications` where `visaApplications`.`passportNumber` NOT LIKE 'enc:v1:%' order by `visaApplications`.`id` asc limit 100",
     sampleParams: [],

@@ -25,7 +25,7 @@ const AdminHome = lazy(() => import("./pages/AdminHome"));
 const AdminShell = lazy(() => import("./layouts/AdminShell"));
 const AdminCustomers = lazy(() => import("./pages/AdminCustomers"));
 const AdminTours = lazy(() => import("./pages/AdminTours"));
-// F3 財務駕駛艙(2026-07-09)取代舊 AdminFinance placeholder。舊檔保留不刪。
+// F3 財務駕駛艙(2026-07-09)取代舊 AdminFinance placeholder(死碼已於 1A0a 刪除)。
 const FinanceCockpit = lazy(() => import("./components/admin-v2/FinanceCockpit"));
 const AdminMarketing = lazy(() => import("./pages/AdminMarketing"));
 const AdminSettings = lazy(() => import("./pages/AdminSettings"));

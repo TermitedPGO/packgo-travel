@@ -95,7 +95,7 @@ export function PLCard() {
           <div className="h-8 rounded bg-gray-100" />
           <div className="h-24 rounded bg-gray-50" />
         </div>
-      ) : state === "error" ? (
+      ) : state === "transport-error" ? (
         <div className="px-4 py-8 text-center text-xs text-gray-400">
           {t("financeCockpit.truth.loadError")}
         </div>
@@ -256,7 +256,7 @@ export function PLCard() {
       )}
 
       {/* 口徑 note(B-final 修訂版文案;退款 0 摺疊成一句) */}
-      {state !== "loading" && state !== "error" && !isZeroMonth && (
+      {state !== "loading" && state !== "transport-error" && !isZeroMonth && (
         <div className="flex gap-1.5 px-4 pb-3 text-[10px] leading-relaxed text-gray-400">
           <Info className="mt-0.5 h-3 w-3 flex-shrink-0 text-gray-300" />
           <span>
