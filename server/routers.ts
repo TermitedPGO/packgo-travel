@@ -74,6 +74,13 @@ import { commandCenterRouter } from "./routers/commandCenter";
 import { flightOrdersRouter } from "./routers/flightOrders";
 import { workspaceRouter } from "./routers/workspace";
 import { preDepartureNotificationsRouter } from "./routers/preDepartureNotifications";
+// Batch P1a (2026-07-20) — storefront data contract layer: public read-only
+// itinerary contracts (packgo.itinerary.v1), fee disclosures, and 3-bucket
+// departure availability. No mutations, no seat counts, no agent prices.
+import { storefrontRouter } from "./routers/storefront";
+// Batch P1b (2026-07-21) — admin-only storefront publish/import write paths
+// (draft versions, honest itinerary/fee imports, atomic publish+supersede).
+import { storefrontPublishRouter } from "./routers/storefrontPublish";
 import { router } from "./_core/trpc";
 
 // ────────────────────────────────────────────────────────────────────────────
@@ -158,6 +165,12 @@ export const appRouter = router({
 
   // Departures management router — Phase 4C extracted to ./routers/departures.ts
   departures: departuresRouter,
+
+  // Batch P1a — public read-only storefront data contracts
+  // (itinerary contract / fee disclosure / 3-bucket departure availability).
+  storefront: storefrontRouter,
+  // Batch P1b — admin-only storefront draft/import/publish write paths.
+  storefrontPublish: storefrontPublishRouter,
 
   // Inquiries management router — Phase 4C extracted to ./routers/inquiries.ts
   inquiries: inquiriesRouter,

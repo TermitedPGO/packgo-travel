@@ -27,6 +27,27 @@ describe("knownRoutes — SPA fallback 200 vs 404", () => {
     }
   });
 
+  it("P1c R2: the two BC nested preview routes are known (direct hit/refresh must be 200)", () => {
+    for (const p of ["/preview/bc", "/preview/bc/tours", "/preview/bc/tours/7"]) {
+      expect(isKnownRoute(p)).toBe(true);
+    }
+    expect(isKnownRoute("/preview/bc/tours/7?lang=en")).toBe(true);
+    expect(isKnownRoute("/preview/bc/tours/")).toBe(true);
+  });
+
+  it("P1c R2: unknown nested preview paths stay 404 — only the two BC routes were added", () => {
+    for (const p of [
+      "/preview/bc/checkout",
+      "/preview/bc/tours/7/print",
+      "/preview/bc/tours/7/x/y",
+      "/preview/other/tours",
+      "/preview/other/tours/7",
+      "/preview/bc/toursx",
+    ]) {
+      expect(isKnownRoute(p)).toBe(false);
+    }
+  });
+
   it("returns 404 for genuinely unknown URLs", () => {
     for (const p of ["/totally-made-up", "/ops-not-really", "/opsx", "/admins"]) {
       expect(isKnownRoute(p)).toBe(false);

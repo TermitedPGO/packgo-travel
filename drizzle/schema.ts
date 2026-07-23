@@ -3969,3 +3969,254 @@ export const flightOrders = mysqlTable("flightOrders", {
 
 export type FlightOrder = typeof flightOrders.$inferSelect;
 export type InsertFlightOrder = typeof flightOrders.$inferInsert;
+
+// ════════════════════════════════════════════════════════════════════════
+// Batch P1a — storefront data contract layer (2026-07-20, migration 0117).
+// Versioned, honest-by-construction public product content: itinerary
+// contracts (packgo.itinerary.v1) + fee disclosures. Read-only wiring —
+// no money movement, no PII. All refs are soft (no DB FK), matching the
+// rest of this schema. "One published version per tour/contract" is
+// enforced in application code, not by the database.
+// ════════════════════════════════════════════════════════════════════════
+
+/**
+ * One row per versioned snapshot of a tour's public product content.
+ * Soft ref tours.id. Invariant (code-enforced): at most ONE row with
+ * status='published' per tourId — publishing supersedes the previous one.
+ */
+export const productVersions = mysqlTable("productVersions", {
+  id: int("id").autoincrement().primaryKey(),
+  /** Soft ref tours.id (no FK, matching repo convention). */
+  tourId: int("tourId").notNull(),
+  /** Monotonic per tour: 1, 2, 3, … */
+  versionNumber: int("versionNumber").notNull(),
+  status: mysqlEnum("status", ["draft", "published", "superseded"]).default("draft").notNull(),
+  /** Hash of the version's canonical content — change detection / dedupe. */
+  contentHash: varchar("contentHash", { length: 128 }),
+  publishedAt: timestamp("publishedAt"),
+  /** users.id of the admin/agent that created this version. */
+  createdBy: int("createdBy").notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+}, (t) => ({
+  uqTourVersion: unique("uq_pv_tour_version").on(t.tourId, t.versionNumber),
+  tourStatusIdx: index("idx_pv_tour_status").on(t.tourId, t.status),
+}));
+
+export type ProductVersion = typeof productVersions.$inferSelect;
+export type InsertProductVersion = typeof productVersions.$inferInsert;
+
+/**
+ * Versioned itinerary contract (schema packgo.itinerary.v1). Belongs to a
+ * productVersion (soft ref). `itineraryId` is the STABLE public identifier
+ * (e.g. 'MAD-5D') that survives across versions; consumers pin to it.
+ */
+export const itineraryVersions = mysqlTable("itineraryVersions", {
+  id: int("id").autoincrement().primaryKey(),
+  /** Soft ref productVersions.id. */
+  productVersionId: int("productVersionId").notNull(),
+  /** Contract shape version consumed by the storefront. */
+  schemaVersion: varchar("schemaVersion", { length: 64 }).default("packgo.itinerary.v1").notNull(),
+  /** Stable public itinerary id, e.g. 'MAD-5D'. */
+  itineraryId: varchar("itineraryId", { length: 64 }).notNull(),
+  versionNumber: int("versionNumber").notNull(),
+  /** Provenance of the itinerary content — honesty ladder, never faked up. */
+  sourceStatus: mysqlEnum("sourceStatus", ["demo_estimate", "source_document", "supplier_confirmed"]).default("demo_estimate").notNull(),
+  /** Market the itinerary is sold from, e.g. 'US-CA'. */
+  originMarket: varchar("originMarket", { length: 32 }),
+  /** JSON array of ISO jurisdiction codes the trip touches, e.g. ["ES"]. */
+  destinationJurisdictions: json("destinationJurisdictions"),
+  status: mysqlEnum("status", ["draft", "published", "superseded"]).default("draft").notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+}, (t) => ({
+  uqItineraryVersion: unique("uq_iv_itinerary_version").on(t.itineraryId, t.versionNumber),
+  productVersionStatusIdx: index("idx_iv_pv_status").on(t.productVersionId, t.status),
+  itineraryStatusIdx: index("idx_iv_itinerary_status").on(t.itineraryId, t.status),
+}));
+
+export type ItineraryVersion = typeof itineraryVersions.$inferSelect;
+export type InsertItineraryVersion = typeof itineraryVersions.$inferInsert;
+
+/**
+ * One row per day of an itineraryVersion. Every claim a customer sees
+ * (movement time, meals, stay, star rating, media) carries its own
+ * confirmation status so the storefront can render honestly.
+ */
+export const itineraryDays = mysqlTable("itineraryDays", {
+  id: int("id").autoincrement().primaryKey(),
+  /** Soft ref itineraryVersions.id. */
+  itineraryVersionId: int("itineraryVersionId").notNull(),
+  /** Stable day id, e.g. 'MAD-5D-D01'. */
+  dayId: varchar("dayId", { length: 64 }).notNull(),
+  dayNumber: int("dayNumber").notNull(),
+  city: varchar("city", { length: 120 }),
+  cityEn: varchar("cityEn", { length: 120 }),
+  summary: text("summary"),
+  sourceStatus: mysqlEnum("sourceStatus", ["demo_estimate", "source_document", "supplier_confirmed"]).default("demo_estimate").notNull(),
+  /** Inter-city movement duration. NULL = no movement claim made. */
+  movementDurationMinutes: int("movementDurationMinutes"),
+  movementStatus: mysqlEnum("movementStatus", ["estimated", "confirmed", "pending"]).default("pending").notNull(),
+  mealBreakfast: mysqlEnum("mealBreakfast", ["self", "included", "included_unconfirmed", "in_flight", "pending"]).default("pending").notNull(),
+  mealLunch: mysqlEnum("mealLunch", ["self", "included", "included_unconfirmed", "in_flight", "pending"]).default("pending").notNull(),
+  mealDinner: mysqlEnum("mealDinner", ["self", "included", "included_unconfirmed", "in_flight", "pending"]).default("pending").notNull(),
+  /** 'proposed_or_equivalent' = 「同級」language; property not locked yet. */
+  stayPropertyStatus: mysqlEnum("stayPropertyStatus", ["proposed_or_equivalent", "confirmed_property", "not_applicable"]).default("proposed_or_equivalent").notNull(),
+  stayBookingStatus: mysqlEnum("stayBookingStatus", ["unconfirmed", "confirmed", "not_applicable"]).default("unconfirmed").notNull(),
+  /** Star rating claim (e.g. 4). NULL = no rating claim made. */
+  stayRatingValue: int("stayRatingValue"),
+  stayRatingSystem: mysqlEnum("stayRatingSystem", ["hotel_classification", "unverified"]),
+  stayRatingSourceStatus: mysqlEnum("stayRatingSourceStatus", [
+    "itinerary_standard_unverified",
+    "source_document_unverified",
+    "source_document_claim",
+    "verified",
+  ]),
+  stayRatingVerifiedAt: timestamp("stayRatingVerifiedAt"),
+  /** Day-level media provenance: what the pictures actually are. */
+  mediaSourceStatus: mysqlEnum("mediaSourceStatus", ["demo_placeholder", "actual", "contextual", "equivalent"]).default("demo_placeholder").notNull(),
+  /** Whether we may legally ship these images beyond the prototype. */
+  mediaRightsStatus: mysqlEnum("mediaRightsStatus", ["prototype_only", "licensed", "owned"]).default("prototype_only").notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+}, (t) => ({
+  uqVersionDay: unique("uq_id_version_day").on(t.itineraryVersionId, t.dayId),
+  versionDayNumberIdx: index("idx_id_version_daynum").on(t.itineraryVersionId, t.dayNumber),
+}));
+
+export type ItineraryDay = typeof itineraryDays.$inferSelect;
+export type InsertItineraryDay = typeof itineraryDays.$inferInsert;
+
+/**
+ * One row per POI/stop within an itinerary day, ordered by sortOrder.
+ * stopId is the stable POI id (e.g. 'd1-wufeng-lin') used by the map layer.
+ */
+export const itineraryStops = mysqlTable("itineraryStops", {
+  id: int("id").autoincrement().primaryKey(),
+  /** Soft ref itineraryDays.id. */
+  itineraryDayId: int("itineraryDayId").notNull(),
+  /** Stable POI id within the itinerary, e.g. 'd1-wufeng-lin'. */
+  stopId: varchar("stopId", { length: 64 }).notNull(),
+  name: varchar("name", { length: 255 }).notNull(),
+  nameEn: varchar("nameEn", { length: 255 }),
+  kind: mysqlEnum("kind", [
+    "arrival",
+    "heritage",
+    "stay",
+    "rail",
+    "culture",
+    "experience",
+    "landscape",
+    "museum",
+    "dining",
+    "harbor",
+    "departure",
+    "sight",
+  ]).notNull(),
+  summary: text("summary"),
+  /** WGS84. NULL = coordinates not sourced yet (never guessed). */
+  lat: decimal("lat", { precision: 10, scale: 7 }),
+  lon: decimal("lon", { precision: 10, scale: 7 }),
+  sourceStatus: mysqlEnum("sourceStatus", ["source_document", "estimated", "pending"]).default("pending").notNull(),
+  visitStatus: mysqlEnum("visitStatus", [
+    "planned_from_source",
+    "route_or_stop_unconfirmed",
+    "proposed_stay",
+    "confirmed",
+  ]).default("route_or_stop_unconfirmed").notNull(),
+  /** Media library asset key. NULL = no image bound yet. */
+  imageAssetId: varchar("imageAssetId", { length: 255 }),
+  mediaStatus: mysqlEnum("mediaStatus", ["demo_placeholder", "actual", "contextual", "equivalent"]).default("demo_placeholder").notNull(),
+  sortOrder: int("sortOrder").default(0).notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+}, (t) => ({
+  uqDayStop: unique("uq_is_day_stop").on(t.itineraryDayId, t.stopId),
+  daySortIdx: index("idx_is_day_sort").on(t.itineraryDayId, t.sortOrder),
+}));
+
+export type ItineraryStop = typeof itineraryStops.$inferSelect;
+export type InsertItineraryStop = typeof itineraryStops.$inferInsert;
+
+/**
+ * Versioned fee disclosure contract for a productVersion. `contractId` is
+ * the stable public identifier. Date validity window gates which contract
+ * a given departure date resolves to. Invariant (code-enforced): at most
+ * one published + date-valid contract per productVersion per date.
+ */
+export const feeContracts = mysqlTable("feeContracts", {
+  id: int("id").autoincrement().primaryKey(),
+  /** Stable public contract id, unique across all contracts. */
+  contractId: varchar("contractId", { length: 64 }).notNull().unique(),
+  /** Soft ref productVersions.id. */
+  productVersionId: int("productVersionId").notNull(),
+  originMarket: varchar("originMarket", { length: 32 }).default("US-CA").notNull(),
+  /** JSON array of ISO jurisdiction codes, e.g. ["ES"]. */
+  destinationJurisdictions: json("destinationJurisdictions"),
+  /** Region label key the disclosure is rendered for. */
+  displayRegion: varchar("displayRegion", { length: 64 }),
+  /** Validity window. NULL bound = open-ended on that side. */
+  validFrom: timestamp("validFrom"),
+  validTo: timestamp("validTo"),
+  sourceStatus: mysqlEnum("sourceStatus", [
+    "demo_estimate",
+    "supplier_quote",
+    "awaiting_supplier_quote",
+    "confirmed",
+  ]).default("demo_estimate").notNull(),
+  status: mysqlEnum("status", ["draft", "published", "superseded"]).default("draft").notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+}, (t) => ({
+  productVersionStatusIdx: index("idx_fc_pv_status").on(t.productVersionId, t.status),
+}));
+
+export type FeeContract = typeof feeContracts.$inferSelect;
+export type InsertFeeContract = typeof feeContracts.$inferInsert;
+
+/**
+ * One row per disclosed fee line within a feeContract.
+ * MONEY RULE: `amountMinorUnits` is INTEGER MINOR UNITS per ISO-4217
+ * (e.g. 100 per USD, 1 per JPY, 1000 per KWD — NOT "cents"). Never
+ * store or compute fee amounts as floats anywhere in this layer.
+ */
+export const feeItems = mysqlTable("feeItems", {
+  id: int("id").autoincrement().primaryKey(),
+  /** Soft ref feeContracts.id. */
+  feeContractId: int("feeContractId").notNull(),
+  /** Stable fee id, unique within its contract (e.g. 'intl-air-tax'). */
+  feeId: varchar("feeId", { length: 64 }).notNull(),
+  category: mysqlEnum("category", ["mandatory", "tips", "self", "optional"]).notNull(),
+  labelZh: varchar("labelZh", { length: 255 }).notNull(),
+  labelEn: varchar("labelEn", { length: 255 }).notNull(),
+  /** Integer ISO-4217 minor units (currency-exponent aware). NEVER float. */
+  amountMinorUnits: int("amountMinorUnits").notNull(),
+  currency: varchar("currency", { length: 3 }).default("USD").notNull(),
+  unit: mysqlEnum("unit", ["per_person", "per_booking"]).default("per_person").notNull(),
+  /** true = already inside the PACK&GO package price (shown, not re-charged). */
+  includedInPackgoCharge: boolean("includedInPackgoCharge").default(false).notNull(),
+  /** true = the trip cannot happen without paying this fee. */
+  requiredForTrip: boolean("requiredForTrip").default(false).notNull(),
+  payeeType: mysqlEnum("payeeType", [
+    "airline",
+    "government",
+    "guide_and_driver",
+    "leader_and_driver",
+    "restaurant_or_traveler_choice",
+    "packgo_or_hotel",
+    "local_supplier",
+    "ticket_supplier",
+    "other",
+  ]).notNull(),
+  paymentTiming: mysqlEnum("paymentTiming", ["before_departure", "during_trip", "if_selected"]).notNull(),
+  sourceStatus: mysqlEnum("sourceStatus", ["demo_estimate", "supplier_quote", "confirmed"]).default("demo_estimate").notNull(),
+  sortOrder: int("sortOrder").default(0).notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+}, (t) => ({
+  uqContractFee: unique("uq_fi_contract_fee").on(t.feeContractId, t.feeId),
+  contractCategoryIdx: index("idx_fi_contract_category").on(t.feeContractId, t.category),
+}));
+
+export type FeeItem = typeof feeItems.$inferSelect;
+export type InsertFeeItem = typeof feeItems.$inferInsert;

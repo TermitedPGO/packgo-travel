@@ -1,0 +1,764 @@
+/**
+ * Batch P1c — BC storefront preview styles.
+ *
+ * Condensed, scoped port of Jeff's finalized BC prototype
+ * (packgo-design-prototype: bc.css + bc-refinement.css). Everything is
+ * namespaced under .bc-preview so nothing leaks into live pages.
+ *
+ * Locked design decisions honored here (prototype NOTES.md):
+ *   - black/white travel-editorial frame; color photos carry desire
+ *   - typography floor 14px (no smaller visible text)
+ *   - rounded corners on visible elements (repo red line 6)
+ *   - tabular-nums + nowrap on prices
+ *   - restrained motion: single soft fade, prefers-reduced-motion honored
+ */
+
+.bc-preview {
+  --bc-ink: #000;
+  --bc-paper: #fff;
+  --bc-muted: rgba(0, 0, 0, 0.62);
+  --bc-line: rgba(0, 0, 0, 0.16);
+  --bc-shadow: 0 18px 54px rgba(0, 0, 0, 0.12);
+  --bc-radius-sm: 12px;
+  --bc-radius: 18px;
+  --bc-radius-lg: 24px;
+  --bc-max: 1320px;
+  --bc-serif: "Noto Serif TC", Georgia, serif;
+  background: var(--bc-paper);
+  color: var(--bc-ink);
+  min-height: 100vh;
+  font-size: 14px;
+  line-height: 1.6;
+  font-variant-numeric: tabular-nums lining-nums;
+  -webkit-font-smoothing: antialiased;
+}
+
+.bc-preview .bc-shell {
+  width: min(var(--bc-max), calc(100% - 48px));
+  margin-inline: auto;
+}
+.bc-preview .bc-section { padding: 56px 0; }
+.bc-preview .bc-section-tight { padding: 28px 0; }
+
+.bc-preview .bc-eyebrow {
+  margin: 0;
+  color: var(--bc-muted);
+  font-size: 14px;
+  font-weight: 800;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+
+.bc-preview .bc-serif { font-family: var(--bc-serif); }
+
+.bc-preview img { display: block; max-width: 100%; }
+.bc-preview button { font: inherit; }
+
+/* Soft page fade — the only page-level motion. */
+.bc-preview .bc-fade { animation: bcFade 300ms ease-out both; }
+@keyframes bcFade {
+  from { opacity: 0; transform: translateY(5px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .bc-preview .bc-fade { animation: none; }
+  .bc-preview * { transition: none !important; }
+}
+
+/* ── Header (置中品牌 masthead ruling 2026-07-17) ─────────────────────── */
+.bc-preview .bc-nav {
+  position: relative;
+  border-bottom: 1px solid var(--bc-ink);
+  background: var(--bc-paper);
+}
+.bc-preview .bc-nav-inner {
+  display: grid;
+  grid-template-columns: 1fr auto 1fr;
+  align-items: center;
+  gap: 18px;
+  min-height: 84px;
+  width: min(var(--bc-max), calc(100% - 48px));
+  margin-inline: auto;
+}
+.bc-preview .bc-nav-links {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  justify-self: start;
+}
+.bc-preview .bc-nav-link {
+  border: 0;
+  background: transparent;
+  border-radius: var(--bc-radius-sm);
+  padding: 9px 12px;
+  color: var(--bc-ink);
+  font-size: 14px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  text-decoration: none;
+  cursor: pointer;
+}
+.bc-preview .bc-nav-link:hover,
+.bc-preview .bc-nav-link:focus-visible { background: var(--bc-ink); color: var(--bc-paper); }
+.bc-preview .bc-nav-link.is-active { text-decoration: underline; text-underline-offset: 6px; }
+.bc-preview .bc-brand {
+  justify-self: center;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  border-radius: var(--bc-radius-sm);
+  padding: 8px 14px;
+  text-decoration: none;
+  color: var(--bc-ink);
+}
+.bc-preview .bc-brand img { height: 30px; width: 30px; object-fit: contain; border-radius: 6px; }
+/* Approved wordmark artwork (prototype 品牌字樣裁決) — never retyped in site fonts. */
+.bc-preview .bc-brand img.bc-brand-wordmark {
+  height: 34px;
+  width: auto;
+  border-radius: 0;
+}
+.bc-preview .bc-nav-tools {
+  justify-self: end;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.bc-preview .bc-nav-tool {
+  border: 1px solid var(--bc-ink);
+  background: var(--bc-paper);
+  color: var(--bc-ink);
+  border-radius: var(--bc-radius-sm);
+  min-height: 40px;
+  padding: 0 14px;
+  font-size: 14px;
+  font-weight: 700;
+  cursor: pointer;
+  text-decoration: none;
+  display: inline-flex;
+  align-items: center;
+}
+.bc-preview .bc-nav-tool:hover,
+.bc-preview .bc-nav-tool:focus-visible { background: var(--bc-ink); color: var(--bc-paper); }
+.bc-preview .bc-preview-tag {
+  display: block;
+  border-bottom: 1px solid var(--bc-line);
+  padding: 6px 0;
+  text-align: center;
+  color: var(--bc-muted);
+  font-size: 14px;
+  letter-spacing: 0.1em;
+}
+
+/* ── Footer ──────────────────────────────────────────────────────────── */
+.bc-preview .bc-footer {
+  margin-top: 64px;
+  border-top: 1px solid var(--bc-ink);
+  padding: 44px 0 32px;
+}
+.bc-preview .bc-footer-top {
+  display: grid;
+  grid-template-columns: minmax(260px, 1.2fr) repeat(3, minmax(0, 1fr));
+  gap: 32px;
+}
+.bc-preview .bc-footer-wordmark { height: 30px; width: auto; display: block; }
+.bc-preview .bc-footer-brand p {
+  margin: 12px 0 0;
+  max-width: 360px;
+  color: var(--bc-muted);
+  font-size: 14px;
+  line-height: 1.75;
+}
+.bc-preview .bc-footer-col h3 {
+  margin: 0 0 12px;
+  font-size: 14px;
+  font-weight: 800;
+  letter-spacing: 0.12em;
+  color: var(--bc-muted);
+}
+.bc-preview .bc-footer-col a {
+  display: block;
+  border-radius: 8px;
+  padding: 4px 0;
+  color: var(--bc-ink);
+  font-size: 14px;
+  text-decoration: none;
+}
+.bc-preview .bc-footer-col a:hover { text-decoration: underline; text-underline-offset: 4px; }
+.bc-preview .bc-footer-bottom {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 16px;
+  margin-top: 36px;
+  border-top: 1px solid var(--bc-line);
+  padding-top: 18px;
+  color: var(--bc-muted);
+  font-size: 14px;
+}
+.bc-preview .bc-footer-bottom address { font-style: normal; line-height: 1.7; }
+
+/* ── Honest state card (shared) ──────────────────────────────────────── */
+.bc-preview .bc-honest {
+  border: 1px solid var(--bc-ink);
+  border-radius: var(--bc-radius);
+  padding: 28px;
+  display: grid;
+  gap: 8px;
+}
+.bc-preview .bc-honest b { font-family: var(--bc-serif); font-size: 22px; line-height: 1.2; }
+.bc-preview .bc-honest span { color: var(--bc-muted); font-size: 14px; line-height: 1.7; }
+
+/* ── Home hero (cohesive A stage, final 2026-07-17 direction) ────────── */
+.bc-preview .bc-hero {
+  position: relative;
+  overflow: hidden;
+  border-radius: 0; /* full-width hero image — the single rounded-corner exemption */
+  background: var(--bc-ink);
+  color: var(--bc-paper);
+}
+.bc-preview .bc-hero figure { position: relative; margin: 0; min-height: clamp(430px, 62vh, 640px); }
+.bc-preview .bc-hero figure img {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  opacity: 0.86;
+}
+.bc-preview .bc-hero-copy {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  gap: 14px;
+  min-height: clamp(430px, 62vh, 640px);
+  padding: clamp(28px, 5vw, 64px) 0;
+  width: min(var(--bc-max), calc(100% - 48px));
+  margin-inline: auto;
+}
+.bc-preview .bc-hero-copy .bc-eyebrow { color: rgba(255, 255, 255, 0.72); }
+.bc-preview .bc-hero-copy h1 {
+  margin: 0;
+  max-width: 720px;
+  font-family: var(--bc-serif);
+  font-size: clamp(38px, 5.4vw, 76px);
+  line-height: 1.04;
+  letter-spacing: -0.03em;
+  text-shadow: 0 2px 24px rgba(0, 0, 0, 0.4);
+}
+.bc-preview .bc-hero-copy h1 span { display: block; }
+.bc-preview .bc-hero-lead {
+  margin: 0;
+  max-width: 560px;
+  color: rgba(255, 255, 255, 0.86);
+  font-size: 15px;
+  line-height: 1.75;
+}
+.bc-preview .bc-hero-actions { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 8px; }
+.bc-preview .bc-hero-cta {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 88px;
+  min-width: min(420px, 100%);
+  border: 0;
+  border-radius: var(--bc-radius);
+  background: var(--bc-paper);
+  color: var(--bc-ink);
+  font-family: var(--bc-serif);
+  font-size: clamp(28px, 3vw, 42px);
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-decoration: none;
+  box-shadow: var(--bc-shadow);
+  cursor: pointer;
+}
+.bc-preview .bc-hero-cta:hover,
+.bc-preview .bc-hero-cta:focus-visible { background: var(--bc-ink); color: var(--bc-paper); outline: 2px solid var(--bc-paper); }
+.bc-preview .bc-hero-trip {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px 26px;
+  border-top: 1px solid rgba(255, 255, 255, 0.4);
+  padding-top: 14px;
+  font-size: 14px;
+}
+.bc-preview .bc-hero-trip small {
+  display: block;
+  color: rgba(255, 255, 255, 0.62);
+  font-size: 14px;
+  letter-spacing: 0.08em;
+}
+.bc-preview .bc-hero-trip b { font-size: 15px; white-space: nowrap; }
+.bc-preview .bc-hero-trip .bc-price { font-family: var(--bc-serif); font-size: 22px; white-space: nowrap; }
+.bc-preview .bc-hero-trip a {
+  margin-left: auto;
+  border-radius: var(--bc-radius-sm);
+  border: 1px solid rgba(255, 255, 255, 0.7);
+  padding: 10px 18px;
+  color: var(--bc-paper);
+  font-size: 14px;
+  font-weight: 700;
+  text-decoration: none;
+  white-space: nowrap;
+}
+.bc-preview .bc-hero-trip a:hover { background: var(--bc-paper); color: var(--bc-ink); }
+
+/* ── Home catalog (風景先行 film strip — catalog B ruling) ───────────── */
+.bc-preview .bc-catalog-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: end;
+  justify-content: space-between;
+  gap: 14px;
+  border-bottom: 1px solid var(--bc-ink);
+  padding-bottom: 16px;
+}
+.bc-preview .bc-catalog-head h2 {
+  margin: 6px 0 0;
+  font-family: var(--bc-serif);
+  font-size: clamp(30px, 3.6vw, 52px);
+  line-height: 1.05;
+  letter-spacing: -0.02em;
+}
+.bc-preview .bc-catalog-head span { color: var(--bc-muted); font-size: 14px; }
+.bc-preview .bc-catalog-all {
+  border: 1px solid var(--bc-ink);
+  border-radius: var(--bc-radius-sm);
+  background: var(--bc-paper);
+  padding: 11px 18px;
+  color: var(--bc-ink);
+  font-size: 14px;
+  font-weight: 700;
+  text-decoration: none;
+  white-space: nowrap;
+}
+.bc-preview .bc-catalog-all:hover { background: var(--bc-ink); color: var(--bc-paper); }
+.bc-preview .bc-catalog-film {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+  margin-top: 18px;
+}
+.bc-preview .bc-catalog-film a {
+  position: relative;
+  display: block;
+  overflow: hidden;
+  border-radius: var(--bc-radius);
+  background: var(--bc-ink);
+  color: var(--bc-paper);
+  text-decoration: none;
+}
+.bc-preview .bc-catalog-film a img {
+  width: 100%;
+  height: 330px;
+  object-fit: cover;
+  opacity: 0.92;
+  transition: opacity 320ms ease;
+}
+.bc-preview .bc-catalog-film a:hover img { opacity: 1; }
+.bc-preview .bc-catalog-film a span {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  display: grid;
+  gap: 3px;
+  background: linear-gradient(transparent, rgba(0, 0, 0, 0.78));
+  padding: 40px 18px 16px;
+}
+.bc-preview .bc-catalog-film small { font-size: 14px; letter-spacing: 0.1em; color: rgba(255, 255, 255, 0.78); }
+.bc-preview .bc-catalog-film b { font-family: var(--bc-serif); font-size: 21px; line-height: 1.2; }
+.bc-preview .bc-catalog-film em { font-style: normal; font-size: 14px; color: rgba(255, 255, 255, 0.85); white-space: nowrap; }
+
+/* ── Page intro (tours shelf) ────────────────────────────────────────── */
+.bc-preview .bc-page-intro {
+  display: grid;
+  grid-template-columns: minmax(0, 1.1fr) minmax(280px, 0.9fr);
+  align-items: end;
+  gap: 32px;
+  padding: 36px 0 8px;
+}
+.bc-preview .bc-page-intro h1 {
+  margin: 8px 0 10px;
+  font-family: var(--bc-serif);
+  font-size: clamp(30px, 4vw, 54px);
+  line-height: 1.08;
+  letter-spacing: -0.02em;
+}
+.bc-preview .bc-page-intro p { margin: 0; max-width: 560px; color: var(--bc-muted); font-size: 14px; line-height: 1.75; }
+.bc-preview .bc-page-intro figure { margin: 0; overflow: hidden; border-radius: var(--bc-radius); }
+.bc-preview .bc-page-intro figure img { width: 100%; height: 220px; object-fit: cover; }
+
+/* ── Shelf filters ───────────────────────────────────────────────────── */
+.bc-preview .bc-finder {
+  border: 1px solid var(--bc-ink);
+  border-radius: var(--bc-radius);
+  padding: 18px;
+  margin-top: 20px;
+  display: grid;
+  gap: 12px;
+}
+.bc-preview .bc-finder-row { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
+.bc-preview .bc-finder-count { margin-left: auto; color: var(--bc-muted); font-size: 14px; white-space: nowrap; }
+.bc-preview .bc-search {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex: 1 1 260px;
+  border: 1px solid var(--bc-ink);
+  border-radius: var(--bc-radius-sm);
+  padding: 0 14px;
+  min-height: 44px;
+}
+.bc-preview .bc-search input {
+  flex: 1;
+  border: 0;
+  outline: none;
+  background: transparent;
+  font-size: 14px;
+  min-width: 0;
+}
+.bc-preview .bc-facet {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  border: 1px solid var(--bc-ink);
+  border-radius: var(--bc-radius-sm);
+  min-height: 44px;
+  padding: 0 12px;
+  background: var(--bc-paper);
+  font-size: 14px;
+}
+.bc-preview .bc-facet small { color: var(--bc-muted); font-size: 14px; letter-spacing: 0.06em; }
+.bc-preview .bc-facet select {
+  border: 0;
+  outline: none;
+  background: transparent;
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--bc-ink);
+  border-radius: 8px;
+}
+.bc-preview .bc-finder-reset {
+  border: 0;
+  background: transparent;
+  border-radius: var(--bc-radius-sm);
+  padding: 10px 12px;
+  color: var(--bc-muted);
+  font-size: 14px;
+  text-decoration: underline;
+  text-underline-offset: 4px;
+  cursor: pointer;
+}
+.bc-preview .bc-finder-reset:hover { color: var(--bc-ink); }
+
+/* ── Tour cards ──────────────────────────────────────────────────────── */
+.bc-preview .bc-tour-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 14px;
+  margin-top: 22px;
+}
+.bc-preview .bc-tour-card {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  border: 1px solid var(--bc-ink);
+  border-radius: var(--bc-radius);
+  background: var(--bc-paper);
+}
+.bc-preview .bc-tour-media { position: relative; aspect-ratio: 16 / 9; background: rgba(0, 0, 0, 0.06); }
+.bc-preview .bc-tour-media img { width: 100%; height: 100%; object-fit: cover; }
+.bc-preview .bc-tour-media .bc-tour-noimg {
+  display: grid;
+  place-items: center;
+  height: 100%;
+  color: var(--bc-muted);
+  font-size: 14px;
+  letter-spacing: 0.1em;
+}
+.bc-preview .bc-tour-body { display: flex; flex-direction: column; flex: 1; gap: 10px; padding: 16px; }
+.bc-preview .bc-tour-code { color: var(--bc-muted); font-size: 14px; letter-spacing: 0.06em; }
+.bc-preview .bc-tour-body h2 {
+  margin: 2px 0 0;
+  font-family: var(--bc-serif);
+  font-size: 20px;
+  line-height: 1.3;
+}
+.bc-preview .bc-tour-facts {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  border-block: 1px solid var(--bc-line);
+  padding: 10px 0;
+  gap: 8px;
+}
+.bc-preview .bc-tour-facts small { display: block; color: var(--bc-muted); font-size: 14px; letter-spacing: 0.04em; }
+.bc-preview .bc-tour-facts b { font-size: 14px; white-space: nowrap; }
+.bc-preview .bc-tour-bottom { display: flex; align-items: end; justify-content: space-between; gap: 10px; margin-top: auto; }
+.bc-preview .bc-tour-price small { display: block; color: var(--bc-muted); font-size: 14px; }
+.bc-preview .bc-tour-price strong { font-family: var(--bc-serif); font-size: 24px; white-space: nowrap; }
+.bc-preview .bc-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 44px;
+  border: 1px solid var(--bc-ink);
+  border-radius: var(--bc-radius-sm);
+  background: var(--bc-ink);
+  color: var(--bc-paper);
+  padding: 0 18px;
+  font-size: 14px;
+  font-weight: 700;
+  text-decoration: none;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.bc-preview .bc-btn:hover, .bc-preview .bc-btn:focus-visible { background: var(--bc-paper); color: var(--bc-ink); }
+.bc-preview .bc-btn-ghost { background: var(--bc-paper); color: var(--bc-ink); }
+.bc-preview .bc-btn-ghost:hover, .bc-preview .bc-btn-ghost:focus-visible { background: var(--bc-ink); color: var(--bc-paper); }
+.bc-preview .bc-pagination {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 16px;
+  margin: 28px 0 8px;
+  font-size: 14px;
+}
+
+/* ── Detail summary ──────────────────────────────────────────────────── */
+.bc-preview .bc-detail-hero { margin: 24px 0 0; overflow: hidden; border-radius: var(--bc-radius-lg); }
+.bc-preview .bc-detail-hero img { width: 100%; height: clamp(280px, 46vh, 460px); object-fit: cover; }
+.bc-preview .bc-detail-summary {
+  display: grid;
+  grid-template-columns: minmax(0, 1.4fr) minmax(280px, 0.6fr);
+  gap: 28px;
+  align-items: end;
+  border-bottom: 1px solid var(--bc-ink);
+  padding: 26px 0;
+}
+.bc-preview .bc-detail-summary h1 {
+  margin: 6px 0 12px;
+  font-family: var(--bc-serif);
+  font-size: clamp(30px, 4.4vw, 58px);
+  line-height: 1.05;
+  letter-spacing: -0.02em;
+}
+.bc-preview .bc-summary-meta { display: flex; flex-wrap: wrap; gap: 8px 18px; color: var(--bc-muted); font-size: 14px; }
+.bc-preview .bc-summary-facts { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
+.bc-preview .bc-summary-facts small { display: block; color: var(--bc-muted); font-size: 14px; letter-spacing: 0.05em; }
+.bc-preview .bc-summary-facts b { font-size: 15px; white-space: nowrap; }
+.bc-preview .bc-summary-facts .bc-price { font-family: var(--bc-serif); font-size: 22px; }
+.bc-preview .bc-detail-actions { display: flex; flex-wrap: wrap; gap: 10px; padding: 18px 0 0; }
+.bc-preview .bc-detail-actions .bc-inquiry-note { flex-basis: 100%; margin: 2px 0 0; color: var(--bc-muted); font-size: 14px; }
+
+.bc-preview .bc-detail-section { padding: 40px 0 0; }
+.bc-preview .bc-detail-section > header { margin-bottom: 18px; }
+.bc-preview .bc-detail-section > header h2 {
+  margin: 4px 0 0;
+  font-family: var(--bc-serif);
+  font-size: clamp(24px, 3vw, 40px);
+  line-height: 1.12;
+}
+
+/* ── Itinerary ───────────────────────────────────────────────────────── */
+.bc-preview .bc-day-rail {
+  display: flex;
+  gap: 8px;
+  overflow-x: auto;
+  padding-bottom: 6px;
+}
+.bc-preview .bc-day-rail button {
+  flex: 0 0 auto;
+  display: grid;
+  gap: 2px;
+  min-width: 108px;
+  border: 1px solid var(--bc-ink);
+  border-radius: var(--bc-radius-sm);
+  background: var(--bc-paper);
+  padding: 10px 12px;
+  text-align: left;
+  cursor: pointer;
+}
+.bc-preview .bc-day-rail button small { color: var(--bc-muted); font-size: 14px; letter-spacing: 0.08em; }
+.bc-preview .bc-day-rail button b { font-size: 14px; line-height: 1.3; }
+.bc-preview .bc-day-rail button.is-active { background: var(--bc-ink); color: var(--bc-paper); }
+.bc-preview .bc-day-rail button.is-active small { color: rgba(255, 255, 255, 0.66); }
+.bc-preview .bc-day-story {
+  display: grid;
+  grid-template-columns: minmax(0, 1.15fr) minmax(260px, 0.85fr);
+  gap: 24px;
+  border: 1px solid var(--bc-ink);
+  border-radius: var(--bc-radius);
+  padding: 24px;
+  margin-top: 14px;
+}
+.bc-preview .bc-day-story h3 { margin: 4px 0 8px; font-family: var(--bc-serif); font-size: 26px; line-height: 1.15; }
+.bc-preview .bc-day-story .bc-day-summary { margin: 0 0 14px; color: var(--bc-muted); font-size: 14px; line-height: 1.75; }
+.bc-preview .bc-day-stops { display: grid; gap: 0; border-top: 1px solid var(--bc-line); }
+.bc-preview .bc-day-stops li {
+  display: flex;
+  gap: 12px;
+  align-items: baseline;
+  border-bottom: 1px solid var(--bc-line);
+  padding: 10px 0;
+  list-style: none;
+}
+.bc-preview .bc-day-stops { margin: 0; padding: 0; }
+.bc-preview .bc-day-stops span.bc-stop-no { color: var(--bc-muted); font-size: 14px; }
+.bc-preview .bc-day-stops b { font-size: 15px; }
+.bc-preview .bc-day-stops small { color: var(--bc-muted); font-size: 14px; }
+.bc-preview .bc-day-answers { display: grid; gap: 16px; align-content: start; }
+.bc-preview .bc-meal-grid { display: grid; gap: 0; margin: 6px 0 0; border-top: 1px solid var(--bc-line); }
+.bc-preview .bc-meal-grid > div {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  border-bottom: 1px solid var(--bc-line);
+  padding: 8px 0;
+}
+.bc-preview .bc-meal-grid dt { font-size: 14px; font-weight: 700; }
+.bc-preview .bc-meal-grid dd { margin: 0; color: var(--bc-muted); font-size: 14px; text-align: right; }
+.bc-preview .bc-meal-grid dd.is-included { color: var(--bc-ink); font-weight: 700; }
+.bc-preview .bc-stay-answer b { display: block; font-family: var(--bc-serif); font-size: 18px; margin-top: 4px; }
+.bc-preview .bc-stay-answer span { color: var(--bc-muted); font-size: 14px; }
+.bc-preview .bc-movement-line { display: flex; gap: 8px; align-items: baseline; font-size: 14px; }
+.bc-preview .bc-movement-line small { color: var(--bc-muted); }
+.bc-preview .bc-source-tag {
+  display: inline-block;
+  border: 1px solid var(--bc-line);
+  border-radius: 8px;
+  padding: 2px 8px;
+  color: var(--bc-muted);
+  font-size: 14px;
+  letter-spacing: 0.04em;
+}
+
+/* ── Departures ──────────────────────────────────────────────────────── */
+.bc-preview .bc-departures { display: grid; gap: 0; border: 1px solid var(--bc-ink); border-radius: var(--bc-radius); overflow: hidden; }
+.bc-preview .bc-departure-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1.3fr) minmax(0, 0.8fr) minmax(0, 0.9fr) auto;
+  align-items: center;
+  gap: 14px;
+  border-bottom: 1px solid var(--bc-line);
+  padding: 14px 18px;
+}
+.bc-preview .bc-departure-row:last-child { border-bottom: 0; }
+.bc-preview .bc-departure-row.bc-departure-head {
+  background: var(--bc-ink);
+  color: var(--bc-paper);
+  font-size: 14px;
+  letter-spacing: 0.08em;
+}
+.bc-preview .bc-departure-row small { display: block; color: var(--bc-muted); font-size: 14px; }
+.bc-preview .bc-departure-dates { font-size: 15px; font-weight: 700; white-space: nowrap; }
+.bc-preview .bc-departure-bucket {
+  justify-self: start;
+  border: 1px solid var(--bc-ink);
+  border-radius: 6px; /* red line 6: badges/tags are rounded-md 6px, never a full pill */
+  padding: 4px 14px;
+  font-size: 14px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+.bc-preview .bc-departure-bucket[data-bucket="waitlist"] { background: var(--bc-ink); color: var(--bc-paper); }
+.bc-preview .bc-departure-price { font-family: var(--bc-serif); font-size: 20px; white-space: nowrap; }
+
+/* ── Fee disclosure ──────────────────────────────────────────────────── */
+.bc-preview .bc-fee-disclosure { display: grid; gap: 12px; }
+.bc-preview .bc-fee-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: end;
+  justify-content: space-between;
+  gap: 10px;
+  border-bottom: 1px solid var(--bc-ink);
+  padding-bottom: 14px;
+}
+.bc-preview .bc-fee-head h2 { margin: 4px 0 6px; font-family: var(--bc-serif); font-size: clamp(24px, 3vw, 40px); line-height: 1.12; }
+.bc-preview .bc-fee-head small { color: var(--bc-muted); font-size: 14px; }
+.bc-preview .bc-fee-pay-now,
+.bc-preview .bc-fee-known-total {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  border-radius: var(--bc-radius);
+  background: var(--bc-ink);
+  color: var(--bc-paper);
+  padding: 18px 22px;
+}
+.bc-preview .bc-fee-pay-now small,
+.bc-preview .bc-fee-known-total small { display: block; color: rgba(255, 255, 255, 0.62); font-size: 14px; letter-spacing: 0.06em; }
+.bc-preview .bc-fee-pay-now b,
+.bc-preview .bc-fee-known-total b { font-size: 15px; }
+.bc-preview .bc-fee-pay-now strong,
+.bc-preview .bc-fee-known-total strong { font-family: var(--bc-serif); font-size: 28px; white-space: nowrap; }
+.bc-preview .bc-fee-category { border: 1px solid var(--bc-ink); border-radius: var(--bc-radius); padding: 18px 22px; }
+.bc-preview .bc-fee-per-booking-note {
+  margin: 12px 0 4px;
+  font-size: 13px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  color: var(--bc-muted);
+}
+.bc-preview .bc-fee-category > header {
+  display: flex;
+  align-items: end;
+  justify-content: space-between;
+  gap: 14px;
+  border-bottom: 1px solid var(--bc-line);
+  padding-bottom: 10px;
+}
+.bc-preview .bc-fee-category h3 { margin: 0; font-family: var(--bc-serif); font-size: 20px; }
+.bc-preview .bc-fee-category > header p { margin: 4px 0 0; color: var(--bc-muted); font-size: 14px; }
+.bc-preview .bc-fee-category > header strong { font-family: var(--bc-serif); font-size: 20px; white-space: nowrap; }
+.bc-preview .bc-fee-category ul { margin: 0; padding: 0; list-style: none; }
+.bc-preview .bc-fee-category li {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 16px;
+  border-bottom: 1px solid var(--bc-line);
+  padding: 10px 0;
+}
+.bc-preview .bc-fee-category li:last-child { border-bottom: 0; }
+.bc-preview .bc-fee-category li b { font-size: 15px; }
+.bc-preview .bc-fee-category li small { display: block; color: var(--bc-muted); font-size: 14px; line-height: 1.6; }
+.bc-preview .bc-fee-category li strong { font-size: 15px; white-space: nowrap; }
+.bc-preview .bc-fee-note { margin: 2px 0 0; color: var(--bc-muted); font-size: 14px; line-height: 1.7; }
+
+/* ── Responsive (NOTES.md mobile rules) ──────────────────────────────── */
+@media (max-width: 1024px) {
+  .bc-preview .bc-tour-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .bc-preview .bc-footer-top { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+@media (max-width: 900px) {
+  .bc-preview .bc-nav-inner { grid-template-columns: auto 1fr; min-height: 0; padding: 10px 0; gap: 10px; }
+  .bc-preview .bc-brand { justify-self: start; flex-direction: row; align-items: center; gap: 10px; padding-left: 0; }
+  .bc-preview .bc-brand img.bc-brand-wordmark { height: 26px; }
+  .bc-preview .bc-nav-tools { grid-row: 1; grid-column: 2; }
+  .bc-preview .bc-nav-links { grid-column: 1 / -1; overflow-x: auto; }
+  .bc-preview .bc-hero figure,
+  .bc-preview .bc-hero-copy { min-height: 380px; }
+  .bc-preview .bc-hero-cta { min-height: 72px; min-width: min(320px, 100%); font-size: 26px; }
+  .bc-preview .bc-page-intro { grid-template-columns: 1fr; }
+  .bc-preview .bc-detail-summary { grid-template-columns: 1fr; align-items: start; }
+  .bc-preview .bc-day-story { grid-template-columns: 1fr; }
+  .bc-preview .bc-departure-row { grid-template-columns: minmax(0, 1fr) auto; row-gap: 8px; }
+  .bc-preview .bc-departure-row.bc-departure-head { display: none; }
+}
+@media (max-width: 640px) {
+  .bc-preview .bc-shell { width: calc(100% - 32px); }
+  .bc-preview .bc-tour-grid { grid-template-columns: 1fr; }
+  .bc-preview .bc-catalog-film { grid-template-columns: 1fr; }
+  .bc-preview .bc-catalog-film a img { height: 300px; }
+  .bc-preview .bc-footer-top { grid-template-columns: 1fr; }
+  .bc-preview .bc-fee-pay-now,
+  .bc-preview .bc-fee-known-total { flex-direction: column; align-items: flex-start; gap: 6px; }
+}

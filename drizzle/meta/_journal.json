@@ -806,6 +806,13 @@
 			"when": 1783791500000,
 			"tag": "0116_checkout_disclosures",
 			"breakpoints": true
+		},
+		{
+			"idx": 117,
+			"version": "5",
+			"when": 1784583768412,
+			"tag": "0117_storefront_data_contracts",
+			"breakpoints": true
 		}
 	]
 }

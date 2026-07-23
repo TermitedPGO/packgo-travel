@@ -52,6 +52,8 @@ export const KNOWN_ROUTE_PATTERNS: RegExp[] = [
   /^\/membership-terms$/,                 // 2026-05-22 P23: AB 390 §17602 disclosure link
   /^\/rewards$/,                          // Round 80.22 Phase F: Packpoint redemption catalog
   /^\/preview\/[^/]+$/,                   // Round 80.9: internal preview/mockup routes
+  /^\/preview\/bc\/tours$/,               // P1c R2 (Codex P1-9): BC shelf — direct hit/refresh must be 200
+  /^\/preview\/bc\/tours\/[^/]+$/,        // P1c R2 (Codex P1-9): BC detail /preview/bc/tours/:id; other nested preview paths stay 404
   /^\/404$/,
 ];
 

@@ -66,6 +66,12 @@ const PaymentFailure = lazy(() => import("./pages/PaymentFailure"));
 const TaskHistory = lazy(() => import("./pages/TaskHistory"));
 const AIAdvisorMockup = lazy(() => import("./pages/preview/AIAdvisorMockup"));
 const ToursTabMockup = lazy(() => import("./pages/preview/ToursTabMockup"));
+// Batch P1c (2026-07-22) — BC storefront redesign preview wired to the real
+// P1a public contracts (storefront.* + tours read). Internal preview only;
+// live customer routes untouched.
+const BcHome = lazy(() => import("./pages/preview/bc/BcHome"));
+const BcTours = lazy(() => import("./pages/preview/bc/BcTours"));
+const BcTourDetail = lazy(() => import("./pages/preview/bc/BcTourDetail"));
 
 // ─── Loading fallback ─────────────────────────────────────────────────────────
 // Round 80.21 — Jeff reported the previous CSS-border spinner had a "boxy
@@ -214,6 +220,10 @@ function Router() {
       {/* Round 80.9: internal preview routes (mockups for product decisions) */}
       <Route path={"/preview/ai-advisor-mockup"} component={AIAdvisorMockup} />
       <Route path={"/preview/tours-tab-mockup"} component={ToursTabMockup} />
+      {/* Batch P1c — BC storefront redesign preview (real P1a data flow) */}
+      <Route path={"/preview/bc/tours/:id"} component={BcTourDetail} />
+      <Route path={"/preview/bc/tours"} component={BcTours} />
+      <Route path={"/preview/bc"} component={BcHome} />
 
       <Route path={"/404"} component={NotFound} />
       {/* Final fallback route */}
