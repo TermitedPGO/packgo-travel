@@ -155,7 +155,7 @@ flyctl secrets unset MIGRATION_DATABASE_URL -a packgo-travel
 - [x] 程式接線已就緒（migrate.mjs 憑證優先序、schema 契約三處觀測、紅綠齊）
 - [ ] 環境已準備（Jeff 在 console/SQL 建 app_runtime + migrator + canary）← **下一步在 Jeff**
 - [ ] 角色已套用（Fly secrets 切換 + 兩步部署驗證）
-- [ ] DDL 拒絕已驗（`scripts/canary-ddl-rejection.mjs` 對 canary 實跑,四類全被拒 + SQLSTATE）
+- [ ] DDL 拒絕已驗（用標準 mysql 客戶端對 canary 實跑四類 DDL,全被拒 + 錯誤碼;做法見桌面指南步驟 9。腳本路徑已於 2026-07-23 退出人工流程）
 
 本批最遠只到「runbook 已撰寫 + 程式已接線」。**未宣稱**權限隔離已生效（那要 Jeff 建角色 + 實跑 canary 測試後才算）。
 
@@ -164,4 +164,4 @@ flyctl secrets unset MIGRATION_DATABASE_URL -a packgo-travel
 1. 在 TiDB Cloud（SQL 或 console SQL Users 頁,以 root）跑 §2.1 建 app_runtime + migrator,貼回兩份 `SHOW GRANTS` 供核對。
 2. 跑 §2.2 建 canary schema + 授權 + 由 migrator 建 `canary_probe_target`。
 3. 依 §2.3 兩步設 Fly secrets 並部署,回報 release 日誌的 `credential source` 行與 `/health` 的 `checks.schema`。
-4. 設 `CANARY_APP_RUNTIME_DATABASE_URL` 跑 `node scripts/canary-runtime-probe.mjs`(9a 正向,14 項)與 `node scripts/canary-ddl-rejection.mjs`(9b 反向,四類 DDL),回報兩支的成績單。兩支的用法、預期輸出、安全前提與檢查項次編號,以 [`docs/infra/canary-verification.md`](./canary-verification.md) 為準。
+4. 用系統內建的標準 mysql 客戶端(`-p` 隱藏輸入密碼,不經任何自寫程式)對 canary 跑三組檢核:正向 CRUD 五行、反向 DDL 四行、migrator 建表兩行,回報畫面訊息。逐字步驟與判準以 `~/Desktop/PACKGO_AI交流/網站專案/DB加固_後台操作指南.md` 步驟 9 為準(2026-07-23 Jeff 裁定改用標準工具,原自寫腳本退出人工流程,理由見 [`canary-verification.md`](./canary-verification.md) 開頭)。
