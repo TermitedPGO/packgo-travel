@@ -494,6 +494,18 @@ const BAD_INPUTS = [
     code: "BAD_HOST",
   },
   {
+    // 2026-07-24 對抗審查抓到的漏洞:純英數 secret 誤落主機名位置。9b 與 9a 共用
+    // 同一份 preflight(),所以同一道 MISSING_CREDENTIALS 防線兩支一起生效。
+    name: "純英數密碼誤落主機名位置(缺 帳號:密碼@,錯位形狀)",
+    url: `mysql://${SENTINEL}:4000/canary`,
+    code: "MISSING_CREDENTIALS",
+  },
+  {
+    name: "只有密碼、缺帳號(錯位形狀)",
+    url: `mysql://:${SENTINEL}@gw.example.com:4000/canary`,
+    code: "MISSING_CREDENTIALS",
+  },
+  {
     name: "DNS 查無主機(會真的去連,連不上)",
     url: `mysql://prefix.app_runtime:${SENTINEL}@gw.canary-probe.invalid:4000/canary`,
     code: null,
@@ -537,6 +549,17 @@ test("行為測試 9b:所有壞輸入都不會走到連線那一步(除了 DNS �
     );
     assert.ok(out.includes("還沒連線,密碼沒有送出去"), c.name);
   }
+});
+
+test("行為測試 9b:純英數密碼誤落主機名位置 → 連線前中止、不印 host、零哨兵(子行程實跑)", () => {
+  // 與 9a 同一道防線(共用 preflight)。錯位 URL 缺 帳號:密碼@,secret 被當成主機名。
+  const { code, out } = runScript(`mysql://${SENTINEL}:4000/canary`);
+  assert.notEqual(code, 0, `錯位 URL 應中止(exit 非 0)\n${out}`);
+  assert.equal(code, 1, out);
+  assertNoLeak("misplaced-hostname 9b", out);
+  assert.ok(!out.includes("連線中:"), `preflight 沒擋住,已開始連線\n${out}`);
+  assert.ok(out.includes("代碼:MISSING_CREDENTIALS"), out);
+  // 突變自證:拿掉 preflight 的缺帳密防線,這條轉紅(secret 會以 host 身分被印出)。
 });
 
 test("行為測試 9b:process 級攔截也裝在 9b 上(子行程實跑)", () => {

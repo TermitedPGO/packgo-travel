@@ -35,15 +35,13 @@
  *      剩的要怎麼手動清。清理結果一律【回頭查 information_schema 複核】,不接受自報。
  *
  * 本批【不實跑】:prod 無 canary、app_runtime 角色尚未建立(見 docs/infra/db-role-hardening.md)。
- * 交付的是腳本 + 預期。Jeff 依 runbook 建好 canary schema 與 app_runtime 角色、佈好探測靶
- * 表 canary_probe_target 後,設 CANARY_APP_RUNTIME_DATABASE_URL 執行本腳本,四類 DDL 全被拒
- * (附 SQLSTATE)才算「權限隔離已驗」。
+ * 人工驗證不走這支腳本(2026-07-23 Jeff 裁定)。canary 的人工驗證一律走桌面指南
+ * 步驟 9(標準 mysql 客戶端):~/Desktop/PACKGO_AI交流/網站專案/DB加固_後台操作指南.md
+ * 步驟 9 第二組「反向 DDL 四行」。不要手動貼含密碼的連線字串來跑這支腳本。
  *
- * 用法(Jeff,canary 佈置完成後):
- *   連線字串含密碼,【不要】直接打在指令列上(會被寫進 shell 歷史檔)。
- *   照 docs/infra/canary-verification.md「設環境變數」那一節的做法 A 或 B 設好
- *   CANARY_APP_RUNTIME_DATABASE_URL,然後:
- *     node scripts/canary-ddl-rejection.mjs
+ * 本腳本僅保留供【未來自動化】使用:屆時 CANARY_APP_RUNTIME_DATABASE_URL 由設定檔 /
+ * 密鑰庫供給給自動化流程(非人手輸入),自動化流程再執行 `node scripts/canary-ddl-rejection.mjs`,
+ * 四類 DDL 全被拒(附 SQLSTATE)才算「權限隔離已驗」。設計見 docs/infra/canary-verification.md。
  *
  * 退出碼:0 = 四類 DDL 全被合格拒絕且靶場零殘留(通過);
  *          1 = 有 DDL 成功(P0)、有 INCONCLUSIVE、有殘留,或任何中止;
@@ -393,9 +391,9 @@ async function main() {
   if (!url) {
     console.log(
       "[canary-ddl] SKIPPED:未設 CANARY_APP_RUNTIME_DATABASE_URL。\n" +
-        "  本批不實跑(prod 無 canary、app_runtime 角色未建)。\n" +
-        "  Jeff 依 docs/infra/db-role-hardening.md 建好 canary schema + app_runtime 角色\n" +
-        "  + 佈好 " + TARGET + " 後,設此 env 再跑。",
+        "  人工驗證不走這支腳本(2026-07-23 裁定):canary 的人工驗證一律走桌面指南步驟 9\n" +
+        "  (標準 mysql 客戶端)~/Desktop/PACKGO_AI交流/網站專案/DB加固_後台操作指南.md。\n" +
+        "  本腳本僅供未來自動化,屆時此 env 由設定檔供給、非人手輸入。無 env 即無害跳過。",
     );
     process.exit(2);
   }

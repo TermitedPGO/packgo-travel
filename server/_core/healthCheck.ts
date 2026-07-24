@@ -64,9 +64,11 @@ export interface HealthCheckPayload {
     redis: SubCheckResult;
     stripe: SubCheckResult;
     llm: SubCheckResult;
-    // schema 契約:REQUIRED_TABLES 全在才 ok。表被 DROP / 清空-未重建 / rename 掉,
-    // 這條會 fail → /health 降級 503,UptimeRobot 告警。防 2026-06-17 tours 清空
-    // 那類「表沒了但沒人知道」再度無聲。見 ./schemaContract.ts。
+    // schema 契約:REQUIRED_TABLES 全在才 ok。這只查【表存不存在】(information_schema),
+    // 表被 DROP / rename 到別名(整張表不見了)時這條 fail → /health 降級 503、
+    // UptimeRobot 告警。防 2026-06-17 tours 整層消失那類「表沒了但沒人知道」再度無聲。
+    // 誠實界線:表還在但被 TRUNCATE / DELETE 清空(COUNT=0)這條【偵測不到】,照樣綠;
+    // 「賣場零商品」那條信號由 deploySmoke 的 activeToursCount 臂顧。見 ./schemaContract.ts。
     schema: SubCheckResult;
   };
 }
@@ -318,10 +320,13 @@ async function checkLlm(): Promise<SubCheckResult> {
 
 /**
  * Schema-contract sub-check — asserts every table in REQUIRED_TABLES exists in
- * the app schema (information_schema read; no writes). A missing required table
- * (DROP / TRUNCATE-then-never-written / rename) degrades the overall verdict so
- * UptimeRobot alerts instead of the storefront silently going to zero for weeks
- * (2026-06-17 tours-wipe pattern). Times out at 3s.
+ * the app schema (information_schema read; no writes). It only detects a table
+ * that is GONE (DROP / rename away); a table that still exists but was emptied
+ * (TRUNCATE / DELETE, COUNT=0) PASSES here — that "zero rows" signal is covered
+ * by deploySmoke's activeToursCount arm, not this check. A missing required
+ * table degrades the overall verdict so UptimeRobot alerts instead of the
+ * storefront silently going to zero for weeks (2026-06-17 tours-wipe pattern,
+ * where the tables were dropped, not merely emptied). Times out at 3s.
  *
  * If getDb() returns null (DATABASE_URL unset in dev) reports a clear "db not
  * configured" fail rather than crashing — same shape as checkDb.

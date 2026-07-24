@@ -27,7 +27,7 @@
 
 1. 建 app_runtime + migrator + canary(`db-role-hardening.md` §2.1/§2.2),貼回 `SHOW GRANTS`。
 2. Fly secrets 兩步切換 + 部署(§2.3),回報 release 日誌 `credential source` 行與 `/health` `checks.schema`。
-3. 設 `CANARY_APP_RUNTIME_DATABASE_URL` 跑 canary 拒絕測試,回報四類 DDL 的 errno/sqlState。
+3. 依【桌面指南步驟 9】(標準 mysql 客戶端,`~/Desktop/PACKGO_AI交流/網站專案/DB加固_後台操作指南.md`)對 canary 跑三組檢核,回報反向 DDL 四行的 errno/sqlState。（2026-07-23 裁定:兩支自寫腳本退出人工流程,不再叫人手設含密碼 URL 執行;腳本僅供未來自動化,連線字串由設定檔供給。理由見 `docs/infra/canary-verification.md` 開頭。）
 4. 還原演練(`restore-drill.md`)實跑,回填 RPO/RTO。
 
 ## 地雷紀錄
@@ -53,9 +53,9 @@
 //   privilege-denied 類錯碼(1142/1044/1045/1227)才算合格拒絕。
 // 四類 DDL 探測:CREATE / ALTER / TRUNCATE / DROP。SQL 一律單引號字串常量,不插值。
 //
-// 用法(Jeff,canary 佈置後):
-//   CANARY_APP_RUNTIME_DATABASE_URL='mysql://<prefix>.app_runtime:<pw>@<host>:4000/canary' \
-//     node scripts/canary-ddl-rejection.mjs
+// 人工驗證:走桌面指南步驟 9(標準 mysql 客戶端),不手動貼含密碼連線字串跑本腳本
+//   (2026-07-23 裁定退出人工流程)。本腳本僅供未來自動化,屆時
+//   CANARY_APP_RUNTIME_DATABASE_URL 由設定檔供給、非人手輸入。
 // 退出碼:0=四類全被合格拒絕;1=有 DDL 成功(P0)或 INCONCLUSIVE;2=未設 env(無害跳過)。
 //
 // 完整實作見 scripts/canary-ddl-rejection.mjs(此處為契約摘要,原始檔為單一事實來源):
@@ -69,4 +69,4 @@
 //   - 全 REJECTED_OK → exit 0;否則 exit 1。
 ```
 
-> 預期(Jeff 實跑時應見):四行皆 `✅ 合格拒絕`,各帶 errno(app_runtime 對 test/canary 只有 CRUD,CREATE/ALTER/TRUNCATE/DROP 應回 1142 ER_TABLEACCESS_DENIED_ERROR / sqlState 42000)。任一行成功或 INCONCLUSIVE 即未通過。
+> 預期(自動化實跑、或桌面指南步驟 9 用標準客戶端手動驗時,反向 DDL 那四行應見):四行皆被權限層拒絕,各帶 errno(app_runtime 對 test/canary 只有 CRUD,CREATE/ALTER/TRUNCATE/DROP 應回 1142 ER_TABLEACCESS_DENIED_ERROR / sqlState 42000)。任一行成功或 INCONCLUSIVE 即未通過。人工驗證一律走桌面指南步驟 9,不手動貼含密碼連線字串跑本腳本。

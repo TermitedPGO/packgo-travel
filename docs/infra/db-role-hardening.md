@@ -96,32 +96,57 @@ GRANT SELECT, INSERT, UPDATE, DELETE,
       CREATE VIEW, CREATE TEMPORARY TABLES, LOCK TABLES
   ON `canary`.* TO 'JgQYPzTFfGurZh9.migrator'@'%';
 
--- 用 migrator 身分（另開連線）在 canary 建一張探測靶表,給 ALTER/TRUNCATE/DROP 探測打:
---   CREATE TABLE `canary`.`canary_probe_target` (id INT PRIMARY KEY);
+-- 用 migrator 身分（另開連線）在 canary 建一張探測靶表,給 ALTER/TRUNCATE/DROP 探測打。
+-- 兩個欄位(id + note):note 是給步驟 9 第一組的 UPDATE 真的改一筆資料用的,只有一個
+-- 欄位時「改資料」那項驗不到真的改成功,等於少驗一半。與桌面指南步驟 8 完全一致:
+--   CREATE TABLE IF NOT EXISTS `canary`.`canary_probe_target` (
+--     id INT PRIMARY KEY,
+--     note VARCHAR(64)
+--   );
 ```
 
-### 2.3 Fly secrets 設定、切換、回滾
+### 2.3 Fly secrets 設定、切換、回滾（不留痕 + 先存後發）
 
-先把現行 root 連線字串**存起來**（回滾用）：`flyctl secrets list -a packgo-travel` 看得到 key,值要從 Jeff 自己的保管處取。
+> **密碼不留痕鐵律**：密碼一律用 `read -s` 隱藏輸入到變數,再用
+> `printf … | flyctl secrets import`(從 stdin 吃)供給 —— **不用 `flyctl secrets set`**,
+> 因為那會把整串含密碼的字串留在 shell history、也曝在程序參數清單裡。桌面指南
+> 步驟 10 / 11 是同一套做法逐字給 Jeff 的版本,兩邊必須一致。`<HOST>` 換成主機位址。
+
+先把現行 root 連線字串**存進 Jeff 的密碼管理工具**（回滾底牌;值不落地、不進對話）。
 
 切換分兩步,每步一次部署,先動 migration 憑證（風險低、絞殺式,不先動唯一活著的 runtime 連線）：
 
 ```bash
 # 步驟 1:先給 migrator。release_command / scripts/migrate.mjs 會優先讀 MIGRATION_DATABASE_URL。
 #   此時 app runtime 仍用舊 root DATABASE_URL(不受影響)。
-flyctl secrets set \
-  MIGRATION_DATABASE_URL='mysql://JgQYPzTFfGurZh9.migrator:<<PW>>@<HOST>:4000/test?ssl={"rejectUnauthorized":true}' \
-  -a packgo-travel
+read -s -r PW   # 隱藏輸入 migrator 密碼(貼上再 enter,畫面不顯示)
+printf 'MIGRATION_DATABASE_URL=mysql://JgQYPzTFfGurZh9.migrator:%s@<HOST>:4000/test?ssl={"rejectUnauthorized":true}\n' "$PW" \
+  | flyctl secrets import -a packgo-travel
+unset PW
 # → 觸發部署。看 release 日誌應出現:
 #   [migrate] credential source: MIGRATION_DATABASE_URL (migrator)
 #   [migrate] ✅ Complete
-# 確認 migration 在 migrator 身分下成功後,再進步驟 2。
+# 沒親眼看到那行 migrator credential source,不准進步驟 2。
+```
 
-# 步驟 2:把 runtime 換成 app_runtime(CRUD only)。
-flyctl secrets set \
-  DATABASE_URL='mysql://JgQYPzTFfGurZh9.app_runtime:<<PW>>@<HOST>:4000/test?ssl={"rejectUnauthorized":true}' \
-  -a packgo-travel
-# → 觸發部署。上線後驗:
+步驟 2:把 runtime 換成 app_runtime(CRUD only)。**先存後發**(`import --stage` → `deploy`):
+按下 deploy 之前都還能反悔,而且回滾底牌先備好。
+
+```bash
+# (a) 先備好回滾:另開一個視窗,把第 2.3 節存的舊 root 字串隱藏輸入到 OLD,
+#     並把下面第二行「打好但先不要按 enter」,留著隨時能救命(回滾用 import,不加 --stage,立即生效):
+read -s -r OLD
+printf 'DATABASE_URL=%s\n' "$OLD" | flyctl secrets import -a packgo-travel   # ← 備好待命,先別執行
+
+# (b) 隱藏輸入 app_runtime 密碼,存成待發(--stage,先不生效,網站此刻不變):
+read -s -r PW
+printf 'DATABASE_URL=mysql://JgQYPzTFfGurZh9.app_runtime:%s@<HOST>:4000/test?ssl={"rejectUnauthorized":true}\n' "$PW" \
+  | flyctl secrets import --stage -a packgo-travel
+
+# (c) 確認日誌視窗開著、回滾那行備好了,再真正生效:
+flyctl secrets deploy -a packgo-travel
+unset PW
+# → 生效後盯三分鐘,每 30 秒驗一次(Fly 的健康檢查不查 DB,不會替你回滾):
 #   curl -s https://packgoplay.com/health | jq '.checks.schema'   # 應 status:"ok"
 #   後台各頁 CRUD 正常(deploySmoke 第九臂 schemaContract 綠)。
 ```
@@ -129,9 +154,11 @@ flyctl secrets set \
 回滾（app_runtime 若卡到某條需要額外權限的 runtime query）：
 
 ```bash
-# 立即把 runtime 換回 root 連線字串(從保管處取),恢復服務:
-flyctl secrets set DATABASE_URL='<<SAVED_ROOT_URL>>' -a packgo-travel
-# migration 憑證要回退成舊行為(byte-identical):unset 後 scripts/migrate.mjs 自動回退讀 DATABASE_URL:
+# 立即把 runtime 換回舊 root 連線字串,一樣不留痕(舊字串隱藏輸入,不進 history/程序參數):
+read -s -r OLD
+printf 'DATABASE_URL=%s\n' "$OLD" | flyctl secrets import -a packgo-travel
+unset OLD
+# migration 憑證回退成舊行為(byte-identical):unset 後 scripts/migrate.mjs 自動回退讀 DATABASE_URL:
 flyctl secrets unset MIGRATION_DATABASE_URL -a packgo-travel
 # 然後在 console 給 app_runtime 明列補上缺的那一項權限,重走步驟 2。切勿因此回頭給 DDL/*.*。
 ```

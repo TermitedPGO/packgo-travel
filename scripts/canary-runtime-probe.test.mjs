@@ -1244,6 +1244,19 @@ const BAD_INPUTS = [
     code: "BAD_HOST",
   },
   {
+    // 2026-07-24 對抗審查抓到的漏洞:純英數 secret 誤落主機名位置(忘了
+    // `<帳號>:<密碼>@`)。secret 過得了主機名白名單、schema 又剛好是 canary,
+    // 舊版一路放行、印「連線中:<secret>」並送 DNS。缺 username+password 一律擋。
+    name: "純英數密碼誤落主機名位置(缺 帳號:密碼@,錯位形狀)",
+    url: `mysql://${SENTINEL}:4000/canary`,
+    code: "MISSING_CREDENTIALS",
+  },
+  {
+    name: "只有密碼、缺帳號(錯位形狀)",
+    url: `mysql://:${SENTINEL}@gw.example.com:4000/canary`,
+    code: "MISSING_CREDENTIALS",
+  },
+  {
     name: "DNS 查無主機(會真的去連,連不上)",
     url: `mysql://prefix.app_runtime:${SENTINEL}@gw.canary-probe.invalid:4000/canary`,
     code: null, // 過得了 preflight,錯在連線層
@@ -1287,6 +1300,22 @@ test("行為測試 9a:所有壞輸入都不會走到連線那一步(除了 DNS �
     );
     assert.ok(out.includes("還沒連線,密碼沒有送出去"), c.name);
   }
+});
+
+test("行為測試 9a:純英數密碼誤落主機名位置 → 連線前中止、不印 host、零哨兵(子行程實跑)", () => {
+  // 錯位形狀:整條只寫成 mysql://<secret>:4000/canary,忘了 `<帳號>:<密碼>@`。
+  // URL 解析器把 secret 當主機名,舊版會印「連線中:<secret>」並送 DNS。
+  // 這是 2026-07-24 對抗審查實測命中的外洩點。
+  const { code, out } = runScript(`mysql://${SENTINEL}:4000/canary`);
+  assert.notEqual(code, 0, `錯位 URL 應中止(exit 非 0)\n${out}`);
+  assert.equal(code, 1, out);
+  // 不印 host:secret 就是被誤放的 host,畫面上一個哨兵字元都不該有。
+  assertNoLeak("misplaced-hostname", out);
+  // 連線前就擋住,沒走到「連線中:」那一步。
+  assert.ok(!out.includes("連線中:"), `preflight 沒擋住,已開始連線\n${out}`);
+  assert.ok(out.includes("代碼:MISSING_CREDENTIALS"), out);
+  // 突變自證:把 preflight 裡「缺 username/password 即擋」那道防線拿掉,這條會轉紅
+  //   —— secret 會以 host 身分被印進「連線中:<secret>」,assertNoLeak 立刻抓到。
 });
 
 test("行為測試:process 級攔截不會把掛在 error 上的連線字串印出來(子行程實跑)", () => {

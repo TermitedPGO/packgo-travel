@@ -31,11 +31,14 @@
  *      所以改成整類禁止:輸出裡的動態值只允許三種白名單化的來源(見 safeHost /
  *      safeIdent / safeNum),其餘一律固定字串。
  *
- * 用法(Jeff,canary 佈置完成後):
- *   連線字串含密碼,【不要】直接打在指令列上(會被寫進 shell 歷史檔)。
- *   照 docs/infra/canary-verification.md「設環境變數」那一節的做法 A 或 B 設好
- *   CANARY_APP_RUNTIME_DATABASE_URL,然後:
- *     node scripts/canary-runtime-probe.mjs
+ * 人工驗證不走這支腳本(2026-07-23 Jeff 裁定)。canary 的人工驗證一律走桌面指南
+ *   步驟 9(標準 mysql 客戶端):
+ *   ~/Desktop/PACKGO_AI交流/網站專案/DB加固_後台操作指南.md 步驟 9。
+ *   不要手動貼含密碼的連線字串來跑這支腳本 —— 這正是多輪對抗審查要根治的外洩來源。
+ *
+ * 本腳本僅保留供【未來自動化】使用:屆時 CANARY_APP_RUNTIME_DATABASE_URL 由設定檔 /
+ *   密鑰庫供給給自動化流程(非人手輸入),自動化流程再執行 `node scripts/canary-runtime-probe.mjs`。
+ *   設計與退出碼見 docs/infra/canary-verification.md。
  *
  * 退出碼:0 = 全項通過;1 = 有任何一項沒過或不成立(fail-closed);
  *          2 = 未設 env(canary 尚未佈置,無害跳過)。
@@ -255,6 +258,7 @@ export const PREFLIGHT = {
   EMPTY_URL: "EMPTY_URL",
   TLS_DISABLED: "TLS_DISABLED",
   BAD_URL: "BAD_URL",
+  MISSING_CREDENTIALS: "MISSING_CREDENTIALS",
   BAD_HOST: "BAD_HOST",
   BAD_ENCODING: "BAD_ENCODING",
   NO_SCHEMA: "NO_SCHEMA",
@@ -291,6 +295,11 @@ export const PREFLIGHT_REASON = Object.freeze({
   BAD_URL:
     "連線字串解析不了。常見原因:port 打錯(例如超過 65535)、密碼裡有斜線或空白、" +
     "整條字串貼漏了一段。port 用 4000,密碼改純英數 32 位,照手冊第四段整條重貼一次。",
+  MISSING_CREDENTIALS:
+    "連線字串缺了帳號或密碼(錯位形狀)。app_runtime 的連線字串一定同時有帳號與密碼," +
+    "長得像 mysql://<帳號>:<密碼>@<主機>:4000/canary。缺 @ 前那一段時,一串純英數的" +
+    "密碼會被 URL 解析器誤當成主機名,舊版會照樣拿去連、還把它印在畫面上。這裡在連線前" +
+    "直接擋掉,絕不印出那個被誤放的值。照手冊第四段的格式整條重貼一次。",
   BAD_HOST:
     "連線字串裡的主機名格式不合(只接受英數、點、減號)。回手冊第四段確認主機名," +
     "再重設一次 env。",
@@ -366,8 +375,26 @@ export function preflight(rawUrl) {
 
   // 主機名白名單化。這是輸出裡唯一允許出現的「來自連線字串的值」,所以在這裡就
   // 把不合格的擋掉:過不了白名單的主機名連印都不該印,更不該拿去連線。
+  // (空主機名 —— 例如 mysql:///canary —— 長度為 0,過不了白名單,這裡就擋成 BAD_HOST。)
   if (!isSafeHostname(u.hostname)) {
     return deny(PREFLIGHT.BAD_HOST, PREFLIGHT_REASON.BAD_HOST);
+  }
+
+  // 錯位形狀:連線字串缺了 username 或 password。
+  // 2026-07-24 對抗審查實測:把純英數 secret 誤貼到主機名位置(例如整條只寫成
+  // `mysql://ZQX9SENTINEL:4000/canary`,忘了 `<帳號>:<密碼>@`)時,URL 解析器會把
+  // ZQX9SENTINEL 當成【主機名】、username/password 都是空字串;secret 是純英數,又剛好
+  // 過得了上面那道主機名白名單、schema 也剛好等於 canary,於是舊版 preflight 一路放行,
+  // 呼叫端接著印「連線中:ZQX9SENTINEL」並拿它去 DNS 解析 —— 等於把誤放的 secret 印出來
+  // 又送上網。app_runtime 的正常連線字串一定同時帶帳號與密碼,所以缺任一段一律當錯位
+  // 擋掉,在連線之前中止;deny 的 reason 是固定字串,【絕不】內插那個被誤放的值。
+  // 擺在主機名白名單【之後】:純英數 secret 那種會過白名單的錯位,精準判成缺帳密;而
+  // 空主機名(mysql:///canary)這種本來就該是 BAD_HOST 的,維持原判、不被這道改寫。
+  if (u.username === "" || u.password === "") {
+    return deny(
+      PREFLIGHT.MISSING_CREDENTIALS,
+      PREFLIGHT_REASON.MISSING_CREDENTIALS,
+    );
   }
 
   // 密碼裡有裸的 % (例如 pa%ss):new URL 收得下,但 connOptionsFor 的
@@ -1255,9 +1282,9 @@ async function main() {
   if (!url) {
     console.log(
       "[canary-probe] SKIPPED:未設 CANARY_APP_RUNTIME_DATABASE_URL。\n" +
-        "  本批不實跑(prod 無 canary、app_runtime 角色未建)。\n" +
-        "  Jeff 依 docs/infra/db-role-hardening.md 建好 canary schema + app_runtime 角色\n" +
-        "  + 佈好 " + TARGET + " 後,設此 env 再跑。",
+        "  人工驗證不走這支腳本(2026-07-23 裁定):canary 的人工驗證一律走桌面指南步驟 9\n" +
+        "  (標準 mysql 客戶端)~/Desktop/PACKGO_AI交流/網站專案/DB加固_後台操作指南.md。\n" +
+        "  本腳本僅供未來自動化,屆時此 env 由設定檔供給、非人手輸入。無 env 即無害跳過。",
     );
     process.exit(2);
   }

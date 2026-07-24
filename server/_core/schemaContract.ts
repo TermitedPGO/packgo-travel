@@ -7,9 +7,11 @@
  * docs/features/public-site/incident-20260617-tours-wipe.md。
  *
  * 這支模組把「一組災難級表必須存在」變成一條可被健康檢查與 ship 後煙霧讀到的
- * 機械信號。表被 DROP / TRUNCATE-then-never-written / rename 到別名時,健康檢查
+ * 機械信號。表被 DROP / rename 到別名(整張表不見了)時,健康檢查
  * (UptimeRobot 每 5 分鐘輪詢的 /health)會降級成 503、deploySmoke 第九臂會標紅,
  * 不再靠 Jeff 自己點開賣場才發現。
+ * 誠實界線(下面契約邊界那段再說一次):這只偵測「表遺失」,不偵測「表還在但被
+ * TRUNCATE / DELETE 清空」—— 清空後表仍在 information_schema,這條照樣綠。
  *
  * ── 契約邊界(後人別誤讀)──────────────────────────────────────────
  *   - 這只查「表存不存在」(information_schema.tables),不查列數、不查 schema 欄位、
