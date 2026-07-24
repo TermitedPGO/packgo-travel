@@ -149,6 +149,9 @@ unset PW
 # → 生效後盯三分鐘,每 30 秒驗一次(Fly 的健康檢查不查 DB,不會替你回滾):
 #   curl -s https://packgoplay.com/health | jq '.checks.schema'   # 應 status:"ok"
 #   後台各頁 CRUD 正常(deploySmoke 第九臂 schemaContract 綠)。
+# → 三分鐘都綠、確認不用回滾之後,把回滾底牌也從記憶體清掉(跟上面 unset PW 並列,
+#   別讓 §2.3 那條舊 root 連線字串續留在 shell 環境):
+unset OLD
 ```
 
 回滾（app_runtime 若卡到某條需要額外權限的 runtime query）：

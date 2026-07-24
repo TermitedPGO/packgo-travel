@@ -97,7 +97,7 @@ WHERE recognizedAt IS NULL;
 
 ### 情境 1:部分刪除（像 2026-06-17,某幾張表被清空,不是整庫掛掉）
 
-- **偵測**:`/health` 的 `schema` 子檢查 + deploySmoke 第九臂 `schemaContract`(本批新建)。任一必要表被 DROP/清空重建 → `/health` 降級 503,UptimeRobot 告警;ship 後煙霧第九臂標紅列出缺哪張。事故當下賣場對客團數歸零另有 `activeToursCount` 臂顧。
+- **偵測**:`/health` 的 `schema` 子檢查 + deploySmoke 第九臂 `schemaContract`(本批新建)。schemaContract 只查「必要表存不存在」:表被 DROP / rename(整張表不見了)→ `/health` 降級 503,UptimeRobot 告警;ship 後煙霧第九臂標紅列出缺哪張。**偵測不到的情況(照實說)**:表被 TRUNCATE / DELETE 清空但沒被刪(COUNT=0、表還在)—— information_schema 仍查得到這張表,這一臂照樣 green。「賣場對客零商品」那條信號改由 `activeToursCount` 臂顧(對客可見團數),兩者互補。
 - **演練驗證**:在**還原 cluster**(不是正式)上,由有 DDL 權限的身分 DROP 一張非關鍵表,對還原 cluster 跑 `assertSchemaContract` 等價查詢,確認 missing 清單抓得到。驗完該 cluster 直接丟棄。
 - **RPO/RTO 對應**:確認從偵測到告警、到能還原回被刪的表,總時間在可接受範圍。
 

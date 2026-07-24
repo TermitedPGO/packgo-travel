@@ -14,7 +14,7 @@
    - `server/_core/index.ts`:啟動一次性 schema 斷言,缺表走 errorFunnel 大聲 + log.error,不 crash。
    - `server/_core/deploySmoke.ts`:第九臂 `schemaContract`。
    - `sqlRehearsal/registryWhitelist.ts`:schemaContract 的 information_schema 探測 + healthCheck SELECT 1 行號漂移同步。
-4. **canary DDL 拒絕測試腳本**:`scripts/canary-ddl-rejection.mjs`。`node --check` 過。設計成「Jeff 建完 canary + app_runtime 後才實跑」,本批不實跑(prod 無 canary)。四類 DDL(CREATE/ALTER/TRUNCATE/DROP)以 app_runtime 對 canary 試,斷言全被拒 + 附真實 errno/sqlState;任一成功 = 立即停、印 P0、不續試。原文見附錄(地雷 #7 留檔)。
+4. **canary DDL 拒絕測試腳本**:`scripts/canary-ddl-rejection.mjs`。`node --check` 過。**已退出人工流程(2026-07-23 裁定)**:人工驗證改走桌面指南步驟 9 的標準 mysql 客戶端;此腳本僅保留供未來自動化(連線字串由設定檔供給、非人手輸入),本批不實跑(prod 無 canary)。四類 DDL(CREATE/ALTER/TRUNCATE/DROP)以 app_runtime 對 canary 試,斷言全被拒 + 附真實 errno/sqlState;任一成功 = 立即停、印 P0、不續試。原文見附錄(地雷 #7 留檔)。
 5. **還原演練 runbook**:`docs/infra/restore-drill.md`。TiDB Cloud 備份還原到隔離 cluster、勾稽 SQL、RPO/RTO 記錄表、部分刪除 + 單供應商停更兩情境。狀態:runbook已撰寫,待Jeff執行。
 
 ## 驗證鏈
@@ -43,7 +43,7 @@
 
 ## 附錄:`scripts/canary-ddl-rejection.mjs` 原文(地雷 #7 留檔)
 
-> 節錄自本批交付檔;`node --check` 通過。實跑證據待 Jeff 建 canary 後補(本批不實跑)。
+> 節錄自本批交付檔;`node --check` 通過。人工驗證走桌面指南步驟 9 的標準客戶端;此腳本已退出人工流程,僅供未來自動化(連線字串由設定檔供給),實跑證據由自動化補(本批不實跑)。
 
 ```js
 #!/usr/bin/env node

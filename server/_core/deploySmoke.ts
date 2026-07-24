@@ -184,10 +184,12 @@ export async function runDeploySmoke(
 
   arms.push(
     await timeArm("schemaContract", async () => {
-      // 第九臂(DB 硬化批):REQUIRED_TABLES 全在才綠。表被 DROP / 清空-未重建 /
-      // rename 掉 → assertSchemaContract 回 ok:false,這裡 throw 讓臂標紅並列出缺表。
-      // 純讀 information_schema,零寫入。與 activeToursCount 互補:那臂看「對客團數」,
-      // 這臂看「災難級表還在不在」(表在但空 → 這臂綠、那臂紅)。見 ./schemaContract.ts。
+      // 第九臂(DB 硬化批):REQUIRED_TABLES 全在才綠。schemaContract 只偵測「必要表
+      // 存不存在」:表被 DROP / rename 掉(整張表不見了)→ assertSchemaContract 回
+      // ok:false,這裡 throw 讓臂標紅並列出缺表。表被 TRUNCATE / DELETE 清空但沒被刪
+      // (COUNT=0、表還在)偵測不到、仍會 green。純讀 information_schema,零寫入。
+      // 與 activeToursCount 互補:那臂看「對客團數」,這臂看「災難級表還在不在」
+      // (表在但空 → 這臂綠、那臂紅)。見 ./schemaContract.ts。
       const drizzleDb = await db.getDb();
       if (!drizzleDb) throw new Error("database not available");
       const res = await assertSchemaContract(drizzleDb);

@@ -8,7 +8,7 @@
  *      稽核鏈那三句 advisory lock / session 指令,全部跑得動)。
  * 只有兩支都過,才算「窄鑰匙帳號換上去不會把網站弄壞」。
  *
- * 安全鐵律(讀懂再跑):
+ * 安全鐵律:
  *   1. 只准對隔離 canary schema 跑。這支【會寫資料】(INSERT/UPDATE/DELETE),
  *      所以 schema 名必須「完全等於 canary」,避免打到 canary_backup 之類的近似名,
  *      更避免打到正式 test schema。這道檢查發生在【連線之前】(preflight(),9a/9b
@@ -284,31 +284,35 @@ export const REQUIRED_SCHEME = "mysql://";
  * 加這張表裡的句子,呼叫端也只印這兩樣東西。
  */
 export const PREFLIGHT_REASON = Object.freeze({
-  EMPTY_URL: "連線字串是空的(env 沒設到,或設成了空字串)。回手冊重設一次 env。",
+  EMPTY_URL:
+    "連線字串是空的(環境變數沒設到,或設成了空字串)。本腳本已退出人工流程;" +
+    "此環境變數由設定檔供給,人工驗證走桌面指南步驟 9 的標準客戶端。",
   TLS_DISABLED:
     "連線字串裡想把憑證驗證關掉(rejectUnauthorized=false)。這條連線會送出密碼,不准不驗。" +
-    "把那一段拿掉再跑。",
+    "設定檔供給的連線字串不應帶這個參數(本腳本已退出人工流程,僅供未來自動化)。",
   BAD_SCHEME:
     `連線字串必須以 ${REQUIRED_SCHEME} 開頭,兩條斜線一條都不能少。` +
     "少一條斜線時 Node 仍然解析得過,但整串帳號密碼會被當成路徑,所以這裡直接擋掉。" +
-    "照手冊第四段的格式整條重貼一次。",
+    "本腳本已退出人工流程;連線字串由設定檔供給,人工驗證走桌面指南步驟 9 的標準客戶端。",
   BAD_URL:
     "連線字串解析不了。常見原因:port 打錯(例如超過 65535)、密碼裡有斜線或空白、" +
-    "整條字串貼漏了一段。port 用 4000,密碼改純英數 32 位,照手冊第四段整條重貼一次。",
+    "整條字串少了一段。連線字串由設定檔供給(本腳本已退出人工流程);" +
+    "人工驗證走桌面指南步驟 9 的標準客戶端。",
   MISSING_CREDENTIALS:
-    "連線字串缺了帳號或密碼(錯位形狀)。app_runtime 的連線字串一定同時有帳號與密碼," +
-    "長得像 mysql://<帳號>:<密碼>@<主機>:4000/canary。缺 @ 前那一段時,一串純英數的" +
-    "密碼會被 URL 解析器誤當成主機名,舊版會照樣拿去連、還把它印在畫面上。這裡在連線前" +
-    "直接擋掉,絕不印出那個被誤放的值。照手冊第四段的格式整條重貼一次。",
+    "連線字串缺了帳號或密碼(錯位形狀)。app_runtime 的連線字串一定同時帶帳號與密碼;" +
+    "缺帳號那一段時,一串純英數的密碼會被 URL 解析器誤當成主機名,舊版會照樣拿去連、還把" +
+    "它印在畫面上。這裡在連線前直接擋掉,絕不印出那個被誤放的值。連線字串由設定檔供給" +
+    "(本腳本已退出人工流程);人工驗證走桌面指南步驟 9 的標準客戶端。",
   BAD_HOST:
-    "連線字串裡的主機名格式不合(只接受英數、點、減號)。回手冊第四段確認主機名," +
-    "再重設一次 env。",
+    "連線字串裡的主機名格式不合(只接受英數、點、減號)。連線字串由設定檔供給" +
+    "(本腳本已退出人工流程);人工驗證走桌面指南步驟 9 的標準客戶端。",
   BAD_ENCODING_USER:
-    "帳號裡有 % 這個編碼字元(Node 會回 URI malformed)。回手冊把帳號照抄一次,不要有 %," +
-    "再重設一次 env。",
+    "帳號裡有 % 這個編碼字元(Node 會回 URI malformed)。設定檔供給的連線字串帳號不應含 %;" +
+    "本腳本已退出人工流程,人工驗證走桌面指南步驟 9 的標準客戶端。",
   BAD_ENCODING_PASSWORD:
-    "密碼裡有 % 這個編碼字元(Node 會回 URI malformed)。" +
-    "回手冊把密碼改成純英數 32 位,不要有 % 也不要有其它符號,再重設一次 env。",
+    "密碼裡有 % 這個編碼字元(Node 會回 URI malformed)。密碼一律純英數 32 位,不要有 % " +
+    "也不要有其它符號。連線字串由設定檔供給(本腳本已退出人工流程);" +
+    "人工驗證走桌面指南步驟 9 的標準客戶端。",
   BAD_ENCODING_SCHEMA:
     "schema 名裡有 % 這個編碼字元(Node 會回 URI malformed)。" +
     `結尾必須剛好是 /${SCHEMA}。`,
@@ -382,7 +386,7 @@ export function preflight(rawUrl) {
 
   // 錯位形狀:連線字串缺了 username 或 password。
   // 2026-07-24 對抗審查實測:把純英數 secret 誤貼到主機名位置(例如整條只寫成
-  // `mysql://ZQX9SENTINEL:4000/canary`,忘了 `<帳號>:<密碼>@`)時,URL 解析器會把
+  // `mysql://ZQX9SENTINEL:4000/canary`,漏了帳號與密碼那一段)時,URL 解析器會把
   // ZQX9SENTINEL 當成【主機名】、username/password 都是空字串;secret 是純英數,又剛好
   // 過得了上面那道主機名白名單、schema 也剛好等於 canary,於是舊版 preflight 一路放行,
   // 呼叫端接著印「連線中:ZQX9SENTINEL」並拿它去 DNS 解析 —— 等於把誤放的 secret 印出來
@@ -890,7 +894,7 @@ export async function runProbe(deps) {
   if (tableCount !== 1) {
     add("03", "靶表在不在", "INCONCLUSIVE", `找到 ${safeNum(tableCount)} 張同名表`);
     throw new ProbeAbort(
-      `中止:靶表 ${TARGET} 沒佈好(找到 ${safeNum(tableCount)} 張)。回手冊步驟 8 把它建起來再跑。` +
+      `中止:靶表 ${TARGET} 沒佈好(找到 ${safeNum(tableCount)} 張)。靶表需由 migrator 依桌面指南步驟 8 建好。` +
         `代碼 ${ABORT.TARGET_MISSING}。`,
       ABORT.TARGET_MISSING,
     );
@@ -1071,7 +1075,7 @@ export async function runProbe(deps) {
           errSummary(e),
           denied
             ? "窄鑰匙帳號沒有修改權限,網站會無法更新訂單狀態。"
-            : "不是權限錯,多半是靶表只有主鍵欄位造成的引擎限制。建議請 Claude 幫靶表補一個欄位再跑。",
+            : "不是權限錯,多半是靶表只有主鍵欄位造成的引擎限制;靶表補一個非主鍵欄位即可完整驗到(見桌面指南步驟 8 的 id+note 定義)。",
         );
       }
     }
@@ -1119,7 +1123,7 @@ export async function runProbe(deps) {
           verdict === "PASS"
             ? undefined
             : verdict === "INCONCLUSIVE"
-              ? "3 秒內沒搶到鎖,八成是上一次跑完留下的殘留鎖。等一分鐘再跑一次。"
+              ? "3 秒內沒搶到鎖,八成是上一次跑完留下的殘留鎖(鎖會在逾時後自然釋放)。"
               : "拿不到稽核鏈的鎖,網站每寫一筆稽核紀錄都會受影響。",
         );
       } catch (e) {
@@ -1142,7 +1146,7 @@ export async function runProbe(deps) {
             `RELEASE_LOCK 回傳 ${safeNum(raw)}`,
             ok
               ? undefined
-              : "鎖放不掉。這條連線會帶著鎖直到逾時,下次重跑第 11 項會等 3 秒。因為用的是 canary 專屬鎖名,正式站不受影響。",
+              : "鎖放不掉。這條連線會帶著鎖直到逾時;因為用的是 canary 專屬鎖名,正式站不受影響。",
           );
         } catch (e) {
           add("12", "稽核鏈的排隊鎖,放得掉嗎", "FAIL", errSummary(e));
@@ -1333,7 +1337,7 @@ async function main() {
     rollback: () => conn.rollback(),
   };
 
-  // KILL 用的拋棄式連線:同一組 TLS 設定,並重跑身分/靶場防呆。
+  // KILL 用的拋棄式連線:同一組 TLS 設定,並再次執行身分/靶場防呆檢查。
   const killProbe = async () => {
     const kc = await raceWithTimeout(
       () => mysql.createConnection(connOpts),

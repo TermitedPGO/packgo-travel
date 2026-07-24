@@ -7,7 +7,7 @@
  *   9b(本檔)驗「不該做到的事,真的做不到」(四類 DDL 被權限層拒絕)。
  * 兩支的完整說明見 docs/infra/canary-verification.md。
  *
- * 安全鐵律(外部審查要求 — 讀懂再跑):
+ * 安全鐵律(外部審查要求):
  *   1. 這支腳本【只准對隔離 canary schema】跑,那個 schema 完全無客戶/財務/商品資料。
  *      絕不對正式 test schema(prod 93 表)跑。靠 CANARY_APP_RUNTIME_DATABASE_URL 這個
  *      env 指向 canary,且連線身分必須是 app_runtime(CRUD 無 DDL)。
@@ -87,7 +87,7 @@ export const ADDED_COL = "canary_added_col";
 export const MANUAL = {
   probeTable: "DROP TABLE IF EXISTS `canary`.`canary_ddl_probe_should_not_exist`;",
   addedCol: "ALTER TABLE `canary`.`canary_probe_target` DROP COLUMN `canary_added_col`;",
-  target: "CREATE TABLE `canary`.`canary_probe_target` (id INT PRIMARY KEY);",
+  target: "CREATE TABLE `canary`.`canary_probe_target` (id INT PRIMARY KEY, note VARCHAR(64));",
 };
 
 // 四類 DDL 探測。sql 一律字串常量,不插值任何外部輸入(地雷 #7 紀律)。
@@ -326,7 +326,7 @@ export async function run(conn) {
           "  SQL: " + probe.sql + "\n" +
           "  副作用: " + probe.effect + "\n" +
           "  權限隔離未生效 —— 立即停測,不續試其餘 DDL。這是 2026-06-17 tours 清空的結構成因。\n" +
-          "  處置:撤掉 app_runtime 的 DDL 權限(見 docs/infra/db-role-hardening.md),重跑本測。",
+          "  處置:撤掉 app_runtime 的 DDL 權限(見 docs/infra/db-role-hardening.md)後重驗。",
       );
       break;
     } catch (e) {
@@ -379,10 +379,10 @@ export async function run(conn) {
     return 0;
   }
   if (allRejected && !clean) {
-    banner("[canary-ddl] 未通過:四類 DDL 雖然全被拒,但靶場有殘留/複核不過。照上面的指令清完再跑一次。");
+    banner("[canary-ddl] 未通過:四類 DDL 雖然全被拒,但靶場有殘留/複核不過。照上面的指令清完再重驗。");
     return 1;
   }
-  banner("[canary-ddl] 未通過:有 DDL 非因權限被拒(INCONCLUSIVE)。修好 canary 佈置後重跑。");
+  banner("[canary-ddl] 未通過:有 DDL 非因權限被拒(INCONCLUSIVE)。修好 canary 佈置後重驗。");
   return 1;
 }
 
