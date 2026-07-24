@@ -21,11 +21,16 @@
  *   3. 每個「被拒」證據都必須附【資料庫真實錯誤碼】(errno + sqlState),不接受腳本自報
  *      「預期被拒」。只有 privilege-denied 類錯誤碼(1142/1044/1045/1227)才算合格拒絕;
  *      其它錯(如 1146 表不存在)= 測試環境沒佈好,標 INCONCLUSIVE 要 Jeff 修 canary 佈置。
- *   4. 連線字串與密碼絕不印出。任何錯誤只印不含憑證的單行摘要(錯誤碼 + 訊息),
- *      永不印原始 error 物件 —— Node 的 ERR_INVALID_URL 會把完整連線字串掛在 `input`
- *      這個 own enumerable 屬性上,直接印物件等於把密碼印給每個看到畫面的人
- *      (Jeff 會把這個畫面截圖貼給 AI)。redact()/errSummary() 沿用 scripts/migrate.mjs
- *      同款寫法,實作與單測都在 9a,本檔直接 import,不另抄一份。
+ *   4. 【零回吐】所有輸出一律不得把使用者貼進來的連線字串內插進去,一個片段都不行。
+ *      拒絕與錯誤訊息只能是「固定字串 + 穩定代碼」;動態值只允許三種白名單化的來源
+ *      (safeHost / safeIdent / safeNum),其餘一律固定字串。
+ *      這條的由來是誠實的:2026-07-23 對抗審查【實測推翻】了舊版「連線字串與密碼
+ *      絕不印出」的宣稱 —— 連線字串少一條斜線時(mysql:user:pw@host:4000/canary),
+ *      整串憑證會掉進 URL 的 pathname,舊版 SCHEMA_MISMATCH 訊息把它原封印到 stderr,
+ *      而且發生在連線之前。所以現在不再靠「印之前記得遮」,改成整類禁止內插。
+ *      errSummary() 只取白名單欄位(絕不印原始 error 物件 —— Node 的 ERR_INVALID_URL
+ *      會把完整連線字串掛在 `input` 這個 own enumerable 屬性上);redact() 是第二道網,
+ *      不是主要防線。兩者實作與單測都在 9a,本檔直接 import,不另抄一份。
  *   5. 收尾一定要交代靶場狀態:本次有沒有建出/改動任何東西、清掉了沒有、還剩什麼、
  *      剩的要怎麼手動清。清理結果一律【回頭查 information_schema 複核】,不接受自報。
  *
@@ -35,7 +40,9 @@
  * (附 SQLSTATE)才算「權限隔離已驗」。
  *
  * 用法(Jeff,canary 佈置完成後):
- *   CANARY_APP_RUNTIME_DATABASE_URL='mysql://<prefix>.app_runtime:<pw>@<canary-host>:4000/canary' \
+ *   連線字串含密碼,【不要】直接打在指令列上(會被寫進 shell 歷史檔)。
+ *   照 docs/infra/canary-verification.md「設環境變數」那一節的做法 A 或 B 設好
+ *   CANARY_APP_RUNTIME_DATABASE_URL,然後:
  *     node scripts/canary-ddl-rejection.mjs
  *
  * 退出碼:0 = 四類 DDL 全被合格拒絕且靶場零殘留(通過);
@@ -53,6 +60,10 @@ import {
   TARGET,
   SCHEMA,
   preflight,
+  connOptionsFor,
+  safeHost,
+  safeIdent,
+  safeNum,
   raceWithTimeout,
   installProcessGuards,
   attachConnErrorGuard,
@@ -124,33 +135,6 @@ function banner(line) {
   console.error(bar);
   console.error(line);
   console.error(bar);
-}
-
-/**
- * TLS 硬設定。rejectUnauthorized 與 verifyIdentity 兩個都要:這條連線會送出
- * app_runtime 的密碼,關驗證等於允許中間人。TiDB Cloud 用公開 CA,Node 內建
- * CA bundle 即可驗過(同 repo 既有 scripts/grant-admin.mjs 就是這樣連的)。
- * verifyIdentity 必須另外寫 true:mysql2 3.16.1 在 lib/base/connection.js 會把
- * checkServerIdentity 換成永遠回 undefined 的空函式,除非傳 verifyIdentity,
- * 也就是只寫 rejectUnauthorized 只驗簽發鏈、不核對主機名。
- */
-const TLS = {
-  rejectUnauthorized: true,
-  verifyIdentity: true,
-  minVersion: "TLSv1.2",
-};
-
-function connOptions(u) {
-  return {
-    host: u.hostname,
-    port: u.port ? Number(u.port) : 4000,
-    user: decodeURIComponent(u.username),
-    password: decodeURIComponent(u.password),
-    database: u.pathname.replace(/^\//, ""),
-    ssl: TLS,
-    multipleStatements: false,
-    connectTimeout: 15000,
-  };
 }
 
 /** conn 查詢的薄包裝,回傳 rows 陣列。 */
@@ -233,7 +217,7 @@ export async function cleanupAndReport(conn, sideEffects) {
       await conn.query(se.undo);
       console.log("[canary-ddl] 清理結果:✅ 已" + se.undoDesc + "(下面再複核一次)");
     } catch (e) {
-      console.log("[canary-ddl] 清理結果:❌ " + se.undoDesc + "失敗 —— " + errSummary(e));
+      console.log("[canary-ddl] 清理結果:❌ " + se.undoDesc + "失敗:" + errSummary(e));
       console.log("[canary-ddl] 請手動執行(TiDB SQL 編輯器,用 migrator 身分):");
       console.log("            " + se.manual);
     }
@@ -243,7 +227,7 @@ export async function cleanupAndReport(conn, sideEffects) {
   try {
     leftovers = await findLeftovers(conn);
   } catch (e) {
-    console.log("[canary-ddl] 清理複核查不動 —— " + errSummary(e));
+    console.log("[canary-ddl] 清理複核查不動:" + errSummary(e));
     console.log(
       "[canary-ddl] 請自行到 TiDB 確認 " + TARGET + " 與 " + CREATE_PROBE + " 的狀態。",
     );
@@ -298,24 +282,32 @@ export async function run(conn) {
   const who = await rows(conn, "SELECT CURRENT_USER() AS cu, DATABASE() AS db");
   const cu = String(who[0] && who[0].cu != null ? who[0].cu : "?");
   const dbName = String(who[0] && who[0].db != null ? who[0].db : "?");
-  console.log("[canary-ddl] 連線身分 CURRENT_USER()=" + cu + "  schema=" + dbName);
+  // 印出去的一律是白名單化過的版本(safeIdent 的字元集不含冒號與斜線,
+  // 任何連線字串形狀都過不了)。這兩個值是【連上之後】伺服器自己回報的。
+  const cuShown = safeIdent(cu);
+  const dbShown = safeIdent(dbName);
+  console.log("[canary-ddl] 連線身分 CURRENT_USER()=" + cuShown + "  schema=" + dbShown);
 
   // 硬防呆第二道:連上之後用伺服器回報的真實值再核一次(連線字串可能被重導)。
   // 走到這裡都還沒跑過任何 DDL,靶場零改動,所以直接中止、不需要清理。
   if (!/app_runtime/i.test(cu)) {
     banner(
-      "[canary-ddl] 中止:連線身分不含 'app_runtime'(" + cu + ")。只准用 app_runtime 對 canary 跑。",
+      "[canary-ddl] 中止:連線身分不含 'app_runtime'(" + cuShown + ")。" +
+        "只准用 app_runtime 對 canary 跑。代碼 ABORT_IDENTITY。",
     );
     return 1;
   }
   if (/^test$/i.test(dbName)) {
-    banner("[canary-ddl] 中止:你把正式 schema(test)貼進來了。絕不准對正式站跑。");
+    banner(
+      "[canary-ddl] 中止:你把正式 schema(test)貼進來了。絕不准對正式站跑。" +
+        "代碼 ABORT_PROD_SCHEMA。",
+    );
     return 1;
   }
   if (dbName !== SCHEMA) {
     banner(
-      "[canary-ddl] 中止:schema 名必須剛好是 '" + SCHEMA + "'(目前是 " + dbName + ")," +
-        "不接受近似名(canary_backup 之類)。",
+      "[canary-ddl] 中止:schema 名必須剛好是 '" + SCHEMA + "'(目前是 " + dbShown + ")," +
+        "不接受近似名(canary_backup 之類)。代碼 ABORT_SCHEMA_MISMATCH。",
     );
     return 1;
   }
@@ -360,9 +352,12 @@ export async function run(conn) {
     }
     results.push(outcome);
     const tag = outcome.status === "REJECTED_OK" ? "✅ 合格拒絕" : "⚠️  不合格";
+    // errno / sqlState / code 是資料庫回報的值,一樣走白名單才印(零回吐政策)。
     console.log(
       "[canary-ddl] " + probe.kind.padEnd(8) + tag +
-        "  errno=" + outcome.errno + " sqlState=" + outcome.sqlState + " code=" + outcome.code,
+        "  errno=" + safeNum(outcome.errno) +
+        " sqlState=" + (outcome.sqlState == null ? "null" : safeIdent(String(outcome.sqlState))) +
+        " code=" + (outcome.code == null ? "null" : safeIdent(String(outcome.code))),
     );
   }
 
@@ -411,15 +406,16 @@ async function main() {
   // 連線字串(含密碼)掛在 error 的 `input` own enumerable 屬性上。
   const pre = preflight(url);
   if (!pre.ok) {
+    // pre.reason 一定是 9a 那張 PREFLIGHT_REASON 固定字串表裡的句子,pre.code 是穩定
+    // 代碼。這兩樣以外什麼都不印 —— 尤其不印「你貼的是什麼」(那正是 critical 的成因)。
     banner(
       "[canary-ddl] 中止(還沒連線,密碼沒有送出去):" + pre.reason + "\n" +
         "  代碼:" + pre.code,
     );
     process.exit(1);
   }
-  const u = pre.u;
 
-  console.log("[canary-ddl] 連線中:" + u.hostname);
+  console.log("[canary-ddl] 連線中:" + safeHost(pre.host));
   // createConnection 也必須自己包 try:放在 try 外面時,連線層錯誤會走未捕捉例外
   // 路徑,把整個 error 物件連同它掛著的連線資訊一起印出來。
   // 外面再包 raceWithTimeout:mysql2 的 connectTimeout 在 TCP 連上那刻就失效,
@@ -427,7 +423,7 @@ async function main() {
   let conn;
   try {
     conn = await raceWithTimeout(
-      () => mysql.createConnection(connOptions(u)),
+      () => mysql.createConnection(connOptionsFor(pre)),
       HANDSHAKE_TIMEOUT_MS,
       "連了 " + HANDSHAKE_TIMEOUT_MS / 1000 +
         " 秒還沒完成 MySQL 交握(對方接了 TCP 卻不講 MySQL,多半是 port 打錯)",

@@ -23,10 +23,18 @@
  *      GET_LOCK 的命名空間是整個叢集共用,靶場與正式站同叢集;探測只要搶走
  *      3 秒,同時間正式站的稽核寫入就會 timeout 走「無鏈孤列」路徑,等於為了
  *      驗證製造一筆事故。權限檢查跟鎖名無關,換名零損失。
- *   5. 連線字串與密碼絕不印出。錯誤一律只取白名單欄位。
+ *   5. 【零回吐】所有輸出一律不得把使用者貼進來的連線字串內插進去 —— 一個片段都不行。
+ *      拒絕與錯誤訊息只能是「固定字串 + 穩定代碼」。這條是 2026-07-23 對抗審查抓到的
+ *      critical 的根治做法:當時 SCHEMA_MISMATCH 把算出來的 schema 名回吐,而少一條
+ *      斜線的連線字串(mysql:user:pw@host:4000/canary)會讓整串憑證掉進 pathname,
+ *      於是「schema 名」等於整串憑證,密碼就這樣印在畫面上。逐條補洞補不完,
+ *      所以改成整類禁止:輸出裡的動態值只允許三種白名單化的來源(見 safeHost /
+ *      safeIdent / safeNum),其餘一律固定字串。
  *
  * 用法(Jeff,canary 佈置完成後):
- *   CANARY_APP_RUNTIME_DATABASE_URL='mysql://<prefix>.app_runtime:<pw>@<canary-host>:4000/canary' \
+ *   連線字串含密碼,【不要】直接打在指令列上(會被寫進 shell 歷史檔)。
+ *   照 docs/infra/canary-verification.md「設環境變數」那一節的做法 A 或 B 設好
+ *   CANARY_APP_RUNTIME_DATABASE_URL,然後:
  *     node scripts/canary-runtime-probe.mjs
  *
  * 退出碼:0 = 全項通過;1 = 有任何一項沒過或不成立(fail-closed);
@@ -47,6 +55,13 @@ export const TARGET = "canary_probe_target";
  * 唯一允許的 schema 名。9a 與 9b 共用同一個常量,完全比對,不做「含有」比對。
  */
 export const SCHEMA = "canary";
+
+/**
+ * 成績單應該有幾項(01 到 14)。比照 9b 的 `results.length === PROBES.length`:
+ * 「每一項都 PASS」不等於「該跑的都跑了」—— 少跑幾項時 every() 照樣回 true。
+ * 權威清單見 docs/infra/canary-verification.md。
+ */
+export const EXPECTED_ITEMS = 14;
 
 /**
  * createConnection 的自家逾時。
@@ -86,18 +101,105 @@ const DISCONNECT_CODES = new Set([
 // 純函式(可單測,不連任何 DB)
 // ---------------------------------------------------------------------------
 
+// ---------------------------------------------------------------------------
+// 白名單化(零回吐政策的唯一例外:只有通過嚴格格式檢查的值才准出現在輸出裡)
+// ---------------------------------------------------------------------------
+
+/** 通不過白名單時印這個。固定字串,不含任何輸入。 */
+export const UNSAFE_PLACEHOLDER = "(格式不合,不顯示)";
+
+/** 主機名長度上限(DNS 全名上限)。 */
+export const HOSTNAME_MAX = 253;
+
 /**
- * 遮掉 `scheme://user:password@host` 這種 URL 裡的憑證。
+ * 主機名嚴格格式檢查:只准 [A-Za-z0-9.-],長度 1..253。
+ * 底線、冒號、斜線、空白、中括號(IPv6 的 [::1])一律不過 —— 通不過就不印。
+ */
+export const isSafeHostname = (h) =>
+  typeof h === "string" &&
+  h.length >= 1 &&
+  h.length <= HOSTNAME_MAX &&
+  /^[A-Za-z0-9.-]+$/.test(h);
+
+/** 識別字長度上限(MySQL 識別字 64 + 帳號@主機 的餘裕)。 */
+export const IDENT_MAX = 128;
+
+/**
+ * 伺服器回報識別字(CURRENT_USER() / DATABASE())的嚴格格式檢查。
+ *
+ * 誠實的界線:這只擋【形狀】。冒號與斜線都不在白名單裡,所以任何連線字串形狀
+ * (scheme://user:pw@host/db、或少斜線那種 user:pw@host:port/db)一個字元都過不了。
+ * 而且這兩個值只有在【資料庫接受連線之後】才存在,那時它們是伺服器自己回報的帳號名
+ * 與 schema 名,不是 Jeff 貼的那串字。
+ */
+export const isSafeIdent = (s) =>
+  typeof s === "string" &&
+  s.length >= 1 &&
+  s.length <= IDENT_MAX &&
+  /^[A-Za-z0-9._@%-]+$/.test(s);
+
+/** 自由文字(憑證簽發者這類)的長度上限。 */
+export const TEXT_MAX = 64;
+
+/**
+ * 自由文字的嚴格格式檢查:英數、空白、以及 . _ , ' ( ) - 。
+ * 冒號、斜線、@ 一律不在裡面 —— 任何連線字串形狀都過不了。
+ */
+export const isSafeText = (s) =>
+  typeof s === "string" &&
+  s.length >= 1 &&
+  s.length <= TEXT_MAX &&
+  /^[A-Za-z0-9 ._,'()-]+$/.test(s);
+
+/** 主機名:過白名單才印,否則印固定的佔位字串。 */
+export const safeHost = (h) => (isSafeHostname(h) ? h : UNSAFE_PLACEHOLDER);
+
+/** 自由文字:過白名單才印,否則印固定的佔位字串。 */
+export const safeText = (s) => (isSafeText(s) ? s : UNSAFE_PLACEHOLDER);
+
+/** 伺服器回報識別字:過白名單才印,否則印固定的佔位字串。 */
+export const safeIdent = (s) => (isSafeIdent(s) ? s : UNSAFE_PLACEHOLDER);
+
+/**
+ * 數字:只有有限數才印,否則印 "?"。字串永遠不會從這裡漏出去。
+ * null / undefined / 空字串一律 "?" —— 不准走 Number(null) === 0 那條路把
+ * 「沒有值」印成「0」,那是誤導,不是遮蔽。
+ */
+export const safeNum = (n) => {
+  if (n === null || n === undefined || n === "") return "?";
+  const v = typeof n === "number" ? n : Number(n);
+  return Number.isFinite(v) ? String(v) : "?";
+};
+
+/**
+ * 遮掉字串裡的憑證。【這是第二道網,不是主要防線。】
+ *
+ * 主要防線是「零回吐」:所有輸出都不內插使用者輸入(見檔頭安全鐵律 5),
+ * 以及 errSummary() 只取白名單欄位。redact() 存在的理由只有一個 —— 錯誤訊息
+ * 是別人(Node / mysql2 / 作業系統)寫的,我們管不到它們往裡面塞什麼。
  *
  * 誠實的宣稱範圍(不是「任何字串都保證遮得掉」):
- *   1. 整個字串【就是】一條 URL 時 —— 交給 Node 的 URL 解析器,帳號密碼一律換成
- *      ***。密碼含 @ / 空白 / 斜線 / tab 這些會打死正規式的字元,走的是這條路,
- *      因為 URL 解析器認的是「最後一個 @」而不是「第一個 @」。
- *   2. 憑證只是【夾在錯誤訊息中間】時 —— 退回正規式。正規式刻意貪婪地吃到同一行
- *      的最後一個 @,寧可多遮(例如把後面的 email 一起遮掉)也不漏。
- * 兩條都不成立時(例如密碼被拆進兩個變數再拼進訊息裡),這個函式遮不到。
- * 真正的保命符是 errSummary():它只取白名單欄位,不碰原始 error 物件。
+ *   1. 整個字串【就是】一條合法 URL 時 —— 交給 Node 的 URL 解析器,帳號密碼換成 ***。
+ *   2. `scheme://user:pw@host` 夾在訊息中間 —— 同一行貪婪吃到最後一個 @;
+ *      憑證跨行時再吃一次,那次只吃到第一個 @。
+ *   3. 【沒有 :// 的 userinfo 形狀】(user:pw@host)—— 這是 2026-07-23 critical 的形狀:
+ *      連線字串少一條斜線時漏出來的東西根本沒有 ://,舊版正規式完全吃不到。同一行
+ *      與跨行各吃一次。
+ * 已知吃不到的情況(照實說):密碼被拆進兩個變數再分別拼進訊息、密碼被百分比編碼
+ * 或轉義成別的形狀、憑證被別人截斷成沒有 @ 的片段。這些只能靠零回吐擋在前面。
  */
+// 有 scheme:同一行貪婪吃到最後一個 @。
+const RE_URL_SAMELINE = /([a-z][a-z0-9+.-]*:\/\/)[^\r\n]*@/gi;
+// 有 scheme:憑證被折行時吃到第一個 @。
+const RE_URL_MULTILINE = /([a-z][a-z0-9+.-]*:\/\/)[^@]{1,512}@/gi;
+// 沒有 :// 的 userinfo 形狀。前面那組是邊界字元(不吃 scheme 的 `:` 與 `/`,
+// 這樣已經遮成 `mysql://***:***@` 的字串不會被再啃掉 scheme)。
+const RE_BARE_SAMELINE =
+  /(^|[^A-Za-z0-9._~%+\-:/])([A-Za-z0-9._~%+-]{1,64}):([^\s@/]{1,256})@/g;
+// 同上,但憑證中間夾了換行(密碼被終端機或編輯器折行的情況)。
+const RE_BARE_MULTILINE =
+  /(^|[^A-Za-z0-9._~%+\-:/])([A-Za-z0-9._~%+-]{1,64}):([^@]{0,256}[\r\n][^@]{0,256})@/g;
+
 export const redact = (s) => {
   const str = String(s ?? "");
   const trimmed = str.trim();
@@ -113,7 +215,17 @@ export const redact = (s) => {
       /* 不是單獨一條 URL,往下走正規式 */
     }
   }
-  return str.replace(/([a-z][a-z0-9+.-]*:\/\/)[^\r\n]*@/gi, "$1***:***@");
+  return (
+    str
+      // 有 scheme,同一行:貪婪吃到最後一個 @(密碼含 @ 的情況)
+      .replace(RE_URL_SAMELINE, "$1***:***@")
+      // 有 scheme,憑證跨行:吃到第一個 @,長度設上限免得吃掉整篇
+      .replace(RE_URL_MULTILINE, "$1***:***@")
+      // 沒有 :// 的 userinfo 形狀,同一行($1 是前置邊界字元,原樣留著)
+      .replace(RE_BARE_SAMELINE, "$1***:***@")
+      // 沒有 :// 的 userinfo 形狀,而且憑證跨了行
+      .replace(RE_BARE_MULTILINE, "$1***:***@")
+  );
 };
 
 /**
@@ -143,11 +255,66 @@ export const PREFLIGHT = {
   EMPTY_URL: "EMPTY_URL",
   TLS_DISABLED: "TLS_DISABLED",
   BAD_URL: "BAD_URL",
+  BAD_HOST: "BAD_HOST",
   BAD_ENCODING: "BAD_ENCODING",
   NO_SCHEMA: "NO_SCHEMA",
   PROD_SCHEMA: "PROD_SCHEMA",
   SCHEMA_MISMATCH: "SCHEMA_MISMATCH",
 };
+
+/** BAD_ENCODING 是哪一段出問題。固定枚舉,不是使用者輸入。 */
+export const PREFLIGHT_FIELD = Object.freeze({
+  USER: "USER",
+  PASSWORD: "PASSWORD",
+  SCHEMA: "SCHEMA",
+});
+
+/** 連線字串必須【字面】以這個開頭(兩條斜線一條都不能少)。 */
+export const REQUIRED_SCHEME = "mysql://";
+
+/**
+ * 所有拒絕訊息的固定字串表。
+ *
+ * 零回吐政策的核心:這裡每一句都是寫死的常量,只內插我們自己的常量(SCHEMA、
+ * REQUIRED_SCHEME),【永遠不內插使用者貼進來的任何片段】。preflight() 只回代碼
+ * 加這張表裡的句子,呼叫端也只印這兩樣東西。
+ */
+export const PREFLIGHT_REASON = Object.freeze({
+  EMPTY_URL: "連線字串是空的(env 沒設到,或設成了空字串)。回手冊重設一次 env。",
+  TLS_DISABLED:
+    "連線字串裡想把憑證驗證關掉(rejectUnauthorized=false)。這條連線會送出密碼,不准不驗。" +
+    "把那一段拿掉再跑。",
+  BAD_SCHEME:
+    `連線字串必須以 ${REQUIRED_SCHEME} 開頭,兩條斜線一條都不能少。` +
+    "少一條斜線時 Node 仍然解析得過,但整串帳號密碼會被當成路徑,所以這裡直接擋掉。" +
+    "照手冊第四段的格式整條重貼一次。",
+  BAD_URL:
+    "連線字串解析不了。常見原因:port 打錯(例如超過 65535)、密碼裡有斜線或空白、" +
+    "整條字串貼漏了一段。port 用 4000,密碼改純英數 32 位,照手冊第四段整條重貼一次。",
+  BAD_HOST:
+    "連線字串裡的主機名格式不合(只接受英數、點、減號)。回手冊第四段確認主機名," +
+    "再重設一次 env。",
+  BAD_ENCODING_USER:
+    "帳號裡有 % 這個編碼字元(Node 會回 URI malformed)。回手冊把帳號照抄一次,不要有 %," +
+    "再重設一次 env。",
+  BAD_ENCODING_PASSWORD:
+    "密碼裡有 % 這個編碼字元(Node 會回 URI malformed)。" +
+    "回手冊把密碼改成純英數 32 位,不要有 % 也不要有其它符號,再重設一次 env。",
+  BAD_ENCODING_SCHEMA:
+    "schema 名裡有 % 這個編碼字元(Node 會回 URI malformed)。" +
+    `結尾必須剛好是 /${SCHEMA}。`,
+  NO_SCHEMA:
+    "連線字串沒有指定 schema(結尾的 /canary 那一段漏了)。" + `結尾必須是 /${SCHEMA}。`,
+  PROD_SCHEMA:
+    "連線字串指向正式 schema 'test'。這兩支只准打隔離靶場 canary," +
+    "絕不准對正式站跑。請改用 canary 的連線字串。",
+  SCHEMA_MISMATCH:
+    `連線字串的 schema 不是 ${SCHEMA}。必須剛好是 '${SCHEMA}',` +
+    "不接受近似名(canary_backup 之類),也不接受大小寫不同,更不接受留空。" +
+    "(這裡刻意不告訴你「目前是什麼」:那個值可能就是你整串連線字串,印出來等於印密碼。)",
+});
+
+const deny = (code, reason, extra) => ({ ok: false, code, reason, ...extra });
 
 /**
  * 【連線之前】就把貼錯的連線字串擋掉。兩支腳本都必須在印出「連線中」之前呼叫,
@@ -155,101 +322,122 @@ export const PREFLIGHT = {
  *
  * 純函式:不連線、不讀 env、不印任何東西,回傳判定讓呼叫端自己印。
  *
+ * 回傳的 reason 一定是 PREFLIGHT_REASON 裡的固定字串,【絕不含使用者輸入的任何片段】。
+ *
  * @param {unknown} rawUrl 連線字串(通常是 CANARY_APP_RUNTIME_DATABASE_URL)
  * @returns {{ok:true, code:"OK", u:URL, host:string, schema:string}
- *          |{ok:false, code:string, reason:string}}
+ *          |{ok:false, code:string, reason:string, field?:string}}
  */
 export function preflight(rawUrl) {
   const raw = typeof rawUrl === "string" ? rawUrl : "";
-  if (!raw.trim()) {
-    return {
-      ok: false,
-      code: PREFLIGHT.EMPTY_URL,
-      reason: "連線字串是空的(env 沒設到,或設成了空字串)。回手冊重設一次 env。",
-    };
+  const trimmed = raw.trim();
+  if (!trimmed) {
+    return deny(PREFLIGHT.EMPTY_URL, PREFLIGHT_REASON.EMPTY_URL);
   }
 
   // 有人想從連線字串把憑證驗證關掉:擋下來並提醒。真正的保護不是這道字串檢查,
-  // 是下面 connOptions() 把 TLS 選項寫死、完全不讀連線字串裡的 ssl 參數。
+  // 是下面 connOptionsFor() 把 TLS 選項寫死、完全不讀連線字串裡的 ssl 參數。
   if (/rejectUnauthorized"?\s*[:=]\s*(?:false|0)/i.test(raw)) {
-    return {
-      ok: false,
-      code: PREFLIGHT.TLS_DISABLED,
-      reason:
-        "連線字串裡想把憑證驗證關掉(rejectUnauthorized=false)。這條連線會送出密碼,不准不驗。" +
-        "把那一段拿掉再跑。",
-    };
+    return deny(PREFLIGHT.TLS_DISABLED, PREFLIGHT_REASON.TLS_DISABLED);
+  }
+
+  // ---- scheme 前置檢查:必須【在 new URL() 之前】 --------------------------
+  // 2026-07-23 critical 的成因:mysql 不是 URL 規範認定的 special scheme,所以
+  // `mysql:user:pw@host:4000/canary`(少一條斜線)new URL() 照樣解析成功,只是
+  // username/password 是空的、整串憑證掉進 pathname。任何在 new URL() 之後才做的
+  // 檢查都已經拿到一個「看起來合法、內容卻完全錯位」的物件。所以這道檢查必須前置,
+  // 而且是對【原始字串】做字面比對,不是問解析器。
+  if (!trimmed.toLowerCase().startsWith(REQUIRED_SCHEME)) {
+    return deny(PREFLIGHT.BAD_URL, PREFLIGHT_REASON.BAD_SCHEME);
   }
 
   let u;
   try {
-    u = new URL(raw.trim());
+    u = new URL(trimmed);
   } catch {
     // catch 刻意【不接參數】:ERR_INVALID_URL 會把完整連線字串(含密碼)掛在
     // error 的 `input` own enumerable 屬性上。
-    return {
-      ok: false,
-      code: PREFLIGHT.BAD_URL,
-      // 這句刻意不放連線字串範本:輸出裡永遠不該出現 scheme://帳號:密碼@ 這種形狀,
-      // 不然「畫面上看到 mysql:// 就是漏洞」這條判準會被自己的提示文字弄髒。
-      reason:
-        "連線字串解析不了。多半是 port 打錯(例如超過 65535),或整條字串貼漏了一段。" +
-        "確認 port 是 4000,格式回手冊第四段對一次,再重設一次 env。",
-    };
+    return deny(PREFLIGHT.BAD_URL, PREFLIGHT_REASON.BAD_URL);
+  }
+  // 解析完再確認一次解析器也同意 scheme(字面比對 + 解析器兩邊都要過)。
+  if (u.protocol !== "mysql:") {
+    return deny(PREFLIGHT.BAD_URL, PREFLIGHT_REASON.BAD_SCHEME);
   }
 
-  // 密碼裡有裸的 % (例如 pa%ss):new URL 收得下,但 connOptions 的
+  // 主機名白名單化。這是輸出裡唯一允許出現的「來自連線字串的值」,所以在這裡就
+  // 把不合格的擋掉:過不了白名單的主機名連印都不該印,更不該拿去連線。
+  if (!isSafeHostname(u.hostname)) {
+    return deny(PREFLIGHT.BAD_HOST, PREFLIGHT_REASON.BAD_HOST);
+  }
+
+  // 密碼裡有裸的 % (例如 pa%ss):new URL 收得下,但 connOptionsFor 的
   // decodeURIComponent 會丟 URIError「URI malformed」。在這裡先試一次,
   // 給出看得懂的診斷,而不是讓 Jeff 對著 msg=URI malformed 猜。
-  for (const [what, value] of [
-    ["帳號", u.username],
-    ["密碼", u.password],
-    ["schema 名", u.pathname],
+  // field 是固定枚舉(我們自己定義的代碼),訊息也是固定字串表查出來的。
+  for (const [field, value] of [
+    [PREFLIGHT_FIELD.USER, u.username],
+    [PREFLIGHT_FIELD.PASSWORD, u.password],
+    [PREFLIGHT_FIELD.SCHEMA, u.pathname],
   ]) {
     try {
       decodeURIComponent(value);
     } catch {
-      return {
-        ok: false,
-        code: PREFLIGHT.BAD_ENCODING,
-        reason:
-          `${what}裡有 % 這個編碼字元(Node 會回 URI malformed)。` +
-          "回手冊把密碼改成純英數 32 位,不要有 % 也不要有其它符號,再重設一次 env。",
-      };
+      return deny(
+        PREFLIGHT.BAD_ENCODING,
+        PREFLIGHT_REASON[`BAD_ENCODING_${field}`],
+        { field },
+      );
     }
   }
 
   const dbFromUrl = decodeURIComponent(u.pathname.replace(/^\//, ""));
-  // 印回去的 schema 名一律先遮再截短:它來自使用者貼的字串,不能無條件信任。
-  const shown = redact(dbFromUrl).slice(0, 60);
   if (!dbFromUrl) {
-    return {
-      ok: false,
-      code: PREFLIGHT.NO_SCHEMA,
-      reason:
-        "連線字串沒有指定 schema(結尾的 /canary 那一段漏了)。" +
-        `結尾必須是 /${SCHEMA}。`,
-    };
+    return deny(PREFLIGHT.NO_SCHEMA, PREFLIGHT_REASON.NO_SCHEMA);
   }
   if (/^test$/i.test(dbFromUrl)) {
-    return {
-      ok: false,
-      code: PREFLIGHT.PROD_SCHEMA,
-      reason:
-        "連線字串指向正式 schema 'test'。這兩支只准打隔離靶場 canary," +
-        "絕不准對正式站跑。請改用 canary 的連線字串。",
-    };
+    return deny(PREFLIGHT.PROD_SCHEMA, PREFLIGHT_REASON.PROD_SCHEMA);
   }
   if (dbFromUrl !== SCHEMA) {
-    return {
-      ok: false,
-      code: PREFLIGHT.SCHEMA_MISMATCH,
-      reason:
-        `連線字串的 schema 必須剛好是 '${SCHEMA}',目前是 '${shown}'。` +
-        "不接受近似名(canary_backup 之類),也不接受大小寫不同,更不接受留空。",
-    };
+    return deny(PREFLIGHT.SCHEMA_MISMATCH, PREFLIGHT_REASON.SCHEMA_MISMATCH);
   }
   return { ok: true, code: PREFLIGHT.OK, u, host: u.hostname, schema: dbFromUrl };
+}
+
+// ---------------------------------------------------------------------------
+// 連線選項(9a / 9b 共用同一份 —— schema 的解碼標準只有一個來源)
+// ---------------------------------------------------------------------------
+
+/**
+ * TLS 硬設定。rejectUnauthorized 與 verifyIdentity 兩個都要:
+ * mysql2 3.16.1 的 lib/base/connection.js 會把 checkServerIdentity 換成永遠回
+ * undefined 的空函式,除非傳 verifyIdentity,也就是只寫 rejectUnauthorized
+ * 只驗簽發鏈、不核對主機名。
+ */
+export const TLS = {
+  rejectUnauthorized: true,
+  verifyIdentity: true,
+  minVersion: "TLSv1.2",
+};
+
+/**
+ * 從 preflight 的通過結果組出連線選項。兩支共用,不各抄一份。
+ *
+ * database 直接用 pre.schema:那是 preflight 用 decodeURIComponent 解過、而且已經
+ * 確認【完全等於 SCHEMA】的值,所以 preflight 與連線選項對 schema 的解碼標準是
+ * 同一個(舊版 preflight 有解碼、connOptions 沒解碼,兩邊標準不一致)。
+ */
+export function connOptionsFor(pre) {
+  const u = pre.u;
+  return {
+    host: u.hostname,
+    port: u.port ? Number(u.port) : 4000,
+    user: decodeURIComponent(u.username),
+    password: decodeURIComponent(u.password),
+    database: pre.schema,
+    ssl: TLS,
+    multipleStatements: false,
+    connectTimeout: 15000,
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -319,7 +507,8 @@ export function installProcessGuards(tag, opts = {}) {
   const report = (kind, e) => {
     log(bar);
     log(`${tag} ${kind}:${errSummary(e)}`);
-    log(`${tag} 上面這行已經把連線字串與密碼遮掉了,可以直接截圖貼出去。`);
+    log(`${tag} 這一行只印錯誤碼與遮蔽後的訊息,設計上不含你的連線字串。`);
+    log(`${tag} 萬一你看到任何像是你密碼的東西,立刻停手告訴 Claude,不要貼出去。`);
     log(bar);
     exit(1);
   };
@@ -354,7 +543,8 @@ export function attachConnErrorGuard(conn, tag, opts = {}) {
     const bar = "=".repeat(72);
     log(bar);
     log(`${tag} 連線層錯誤(已遮蔽):${errSummary(e)}`);
-    log(`${tag} 上面這行已經把連線字串與密碼遮掉了,可以直接截圖貼出去。`);
+    log(`${tag} 這一行只印錯誤碼與遮蔽後的訊息,設計上不含你的連線字串。`);
+    log(`${tag} 萬一你看到任何像是你密碼的東西,立刻停手告訴 Claude,不要貼出去。`);
     log(bar);
     exit(1);
   });
@@ -450,6 +640,9 @@ export function renderRow(r, width = 52) {
 /**
  * 白話成績單。給不讀 code 的人看,所以:三種 ASCII 標記、無 emoji、無破折號,
  * 項次編號跟手冊的回報清單對得起來(Jeff 可以直接截圖回報)。
+ *
+ * 成績單也吃零回吐政策:抬頭那三個值(靶場 / 身分 / 主機)一律再過一次白名單,
+ * 呼叫端已經過濾過也不例外 —— 這個函式是 export 的,不能假設呼叫端做對了。
  */
 export function renderReport(results, meta = {}) {
   const bar = "=".repeat(72);
@@ -457,7 +650,9 @@ export function renderReport(results, meta = {}) {
   out.push(bar);
   out.push("正向驗證:該成功的操作,是不是真的成功");
   out.push(
-    `靶場 ${meta.schema ?? "?"}(零客戶資料) / 身分 ${meta.user ?? "?"} / 主機 ${meta.host ?? "?"}`,
+    `靶場 ${meta.schema == null ? "?" : safeIdent(String(meta.schema))}(零客戶資料)` +
+      ` / 身分 ${meta.user == null ? "?" : safeIdent(String(meta.user))}` +
+      ` / 主機 ${meta.host == null ? "?" : safeHost(String(meta.host))}`,
   );
   out.push(bar);
   // 一律照項次排序再印。交易那項(10)是在 11、12 跑完 COMMIT 後才登記結果的,
@@ -473,14 +668,30 @@ export function renderReport(results, meta = {}) {
   const bad = ordered.filter((r) => r.status !== "PASS");
   const ledger =
     meta.baseline != null && meta.after != null
-      ? `靶場:開始 ${meta.baseline} 列,結束 ${meta.after} 列,本次殘留 ${meta.after - meta.baseline} 列。`
+      ? `靶場:開始 ${safeNum(meta.baseline)} 列,結束 ${safeNum(meta.after)} 列,` +
+        `本次殘留 ${safeNum(meta.after - meta.baseline)} 列。`
       : "靶場:列數未取得(前置檢查就中止了)。";
 
-  if (bad.length === 0) {
-    out.push(`結論:全部 ${results.length} 項通過。網站帳號該做的事都做得到。`);
+  // 比照 9b 的 results.length === PROBES.length:「每一項都 PASS」不等於「該跑的
+  // 都跑了」。少跑幾項時 every() 照樣回 true,成績單不准因此印「全部通過」。
+  const countOk = results.length === EXPECTED_ITEMS;
+
+  if (bad.length === 0 && countOk) {
+    out.push(
+      `結論:全部 ${safeNum(results.length)} 項通過(應有 ${safeNum(EXPECTED_ITEMS)} 項)。` +
+        "網站帳號該做的事都做得到。",
+    );
     out.push(ledger);
   } else {
-    out.push(`結論:${results.length} 項裡有 ${bad.length} 項沒過。`);
+    if (!countOk) {
+      out.push(
+        `結論:項數不對,只有 ${safeNum(results.length)} 項,應該有 ${safeNum(EXPECTED_ITEMS)} 項。` +
+          "這代表流程中途被截斷,不管有沒有紅字都不算過。",
+      );
+    }
+    if (bad.length > 0) {
+      out.push(`結論:${safeNum(results.length)} 項裡有 ${safeNum(bad.length)} 項沒過。`);
+    }
     for (const r of bad) {
       out.push(`  沒過的是:第 ${r.no} 項 ${r.label}`);
       if (r.evidence) out.push(`    資料庫回的:${r.evidence}`);
@@ -495,11 +706,27 @@ export function renderReport(results, meta = {}) {
   return out.join("\n");
 }
 
+/**
+ * 連上之後的中止代碼。跟 PREFLIGHT 一樣是穩定代碼:訊息可以改寫,代碼不會變,
+ * 文件與測試都認代碼。
+ */
+export const ABORT = Object.freeze({
+  NO_TLS: "ABORT_NO_TLS",
+  TLS_UNVERIFIED: "ABORT_TLS_UNVERIFIED",
+  IDENTITY: "ABORT_IDENTITY",
+  PROD_SCHEMA: "ABORT_PROD_SCHEMA",
+  SCHEMA_MISMATCH: "ABORT_SCHEMA_MISMATCH",
+  TARGET_MISSING: "ABORT_TARGET_MISSING",
+  TARGET_TOO_BIG: "ABORT_TARGET_TOO_BIG",
+  KILL_PROBE_IDENTITY: "ABORT_KILL_PROBE_IDENTITY",
+});
+
 /** 前置檢查擋下來時丟這個,主流程會印 72 等號橫幅,跟「測試結果」區分開。 */
 export class ProbeAbort extends Error {
-  constructor(message) {
+  constructor(message, code = null) {
     super(message);
     this.name = "ProbeAbort";
+    this.abortCode = code;
   }
 }
 
@@ -551,10 +778,14 @@ export async function runProbe(deps) {
   };
 
   // --- 01 TLS -------------------------------------------------------------
+  // 這一段的證據值全部走白名單(safeIdent):TLS 層回報的協定/加密套件/簽發者
+  // 雖然不是 Jeff 貼的字串,但也是外部來源,一樣不無條件相信。
   if (!tlsInfo || !tlsInfo.protocol) {
     add("01", "連線有沒有加密", "FAIL", "沒有 TLS 通道");
     throw new ProbeAbort(
-      "中止:這條連線沒有加密。app_runtime 的密碼會以明文送出,拒絕繼續。",
+      "中止:這條連線沒有加密。app_runtime 的密碼會以明文送出,拒絕繼續。" +
+        `代碼 ${ABORT.NO_TLS}。`,
+      ABORT.NO_TLS,
     );
   }
   if (tlsInfo.authorized !== true) {
@@ -562,17 +793,19 @@ export async function runProbe(deps) {
       "01",
       "連線有沒有加密",
       "FAIL",
-      `憑證驗證失敗:${tlsInfo.authorizationError ?? "(未提供原因)"}`,
+      `憑證驗證失敗:${tlsInfo.authorizationError ? safeIdent(String(tlsInfo.authorizationError)) : "(未提供原因)"}`,
     );
     throw new ProbeAbort(
-      "中止:伺服器憑證驗不過。不要改成不驗憑證,把這個畫面貼給 Claude。",
+      "中止:伺服器憑證驗不過。不要改成不驗憑證,把這個畫面貼給 Claude。" +
+        `代碼 ${ABORT.TLS_UNVERIFIED}。`,
+      ABORT.TLS_UNVERIFIED,
     );
   }
   add(
     "01",
     "連線有沒有加密、憑證驗不驗得過",
     "PASS",
-    `${tlsInfo.protocol} / ${tlsInfo.cipher ?? "?"} / 簽發者 ${tlsInfo.issuer ?? "?"}`,
+    `${safeIdent(String(tlsInfo.protocol))} / ${tlsInfo.cipher ? safeIdent(String(tlsInfo.cipher)) : "?"} / 簽發者 ${tlsInfo.issuer ? safeText(String(tlsInfo.issuer)) : "?"}`,
   );
 
   // --- 02 身分與靶場 -------------------------------------------------------
@@ -580,32 +813,43 @@ export async function runProbe(deps) {
   const cu = String(pick(who, "cu") ?? "?");
   const dbName = String(pick(who, "db") ?? "?");
   const ver = String(pick(who, "v") ?? "?");
-  meta.user = cu;
-  meta.schema = dbName;
+  // 印出去的一律是白名單化過的版本。cu / dbName 是【連上之後】伺服器自己回報的值,
+  // 不是 Jeff 貼的那串字(database 連 connOptionsFor 送出去的都是常量 SCHEMA),
+  // 而 safeIdent 的字元集不含冒號與斜線,任何連線字串形狀都過不了。
+  const cuShown = safeIdent(cu);
+  const dbShown = safeIdent(dbName);
+  meta.user = cuShown;
+  meta.schema = dbShown;
 
   if (!/app_runtime/i.test(cu)) {
-    add("02", "連線身分與靶場對不對", "FAIL", `CURRENT_USER()=${cu}`);
+    add("02", "連線身分與靶場對不對", "FAIL", `CURRENT_USER()=${cuShown}`);
     throw new ProbeAbort(
-      `中止:連線身分不含 'app_runtime'(${cu})。只准用 app_runtime 對 canary 跑。`,
+      `中止:連線身分不含 'app_runtime'(${cuShown})。只准用 app_runtime 對 canary 跑。` +
+        `代碼 ${ABORT.IDENTITY}。`,
+      ABORT.IDENTITY,
     );
   }
   if (/^test$/i.test(dbName)) {
-    add("02", "連線身分與靶場對不對", "FAIL", `DATABASE()=${dbName}`);
+    add("02", "連線身分與靶場對不對", "FAIL", `DATABASE()=${dbShown}`);
     throw new ProbeAbort(
-      "中止:你把正式 schema(test)貼進來了。這支會寫資料,絕不准對正式站跑。",
+      "中止:你把正式 schema(test)貼進來了。這支會寫資料,絕不准對正式站跑。" +
+        `代碼 ${ABORT.PROD_SCHEMA}。`,
+      ABORT.PROD_SCHEMA,
     );
   }
   if (dbName !== SCHEMA) {
-    add("02", "連線身分與靶場對不對", "FAIL", `DATABASE()=${dbName}`);
+    add("02", "連線身分與靶場對不對", "FAIL", `DATABASE()=${dbShown}`);
     throw new ProbeAbort(
-      `中止:schema 名必須剛好是 '${SCHEMA}'(目前是 ${dbName})。這支會寫資料,不接受近似名。`,
+      `中止:schema 名必須剛好是 '${SCHEMA}'(目前是 ${dbShown})。這支會寫資料,不接受近似名。` +
+        `代碼 ${ABORT.SCHEMA_MISMATCH}。`,
+      ABORT.SCHEMA_MISMATCH,
     );
   }
   add(
     "02",
     "連線身分與靶場對不對",
     "PASS",
-    `身分=${cu} 靶場=${dbName} 版本=${ver}`,
+    `身分=${cuShown} 靶場=${dbShown} 版本=${safeIdent(ver)}`,
   );
 
   // --- 03 靶表 -------------------------------------------------------------
@@ -617,9 +861,11 @@ export async function runProbe(deps) {
   );
   const tableCount = Number(pick(cnt, "n") ?? 0);
   if (tableCount !== 1) {
-    add("03", "靶表在不在", "INCONCLUSIVE", `找到 ${tableCount} 張同名表`);
+    add("03", "靶表在不在", "INCONCLUSIVE", `找到 ${safeNum(tableCount)} 張同名表`);
     throw new ProbeAbort(
-      `中止:靶表 ${TARGET} 沒佈好(找到 ${tableCount} 張)。回手冊步驟 8 把它建起來再跑。`,
+      `中止:靶表 ${TARGET} 沒佈好(找到 ${safeNum(tableCount)} 張)。回手冊步驟 8 把它建起來再跑。` +
+        `代碼 ${ABORT.TARGET_MISSING}。`,
+      ABORT.TARGET_MISSING,
     );
   }
 
@@ -627,9 +873,11 @@ export async function runProbe(deps) {
   const baseline = Number(pick(baseRow, "n") ?? 0);
   meta.baseline = baseline;
   if (baseline > 1000) {
-    add("03", "靶表在不在", "FAIL", `靶表有 ${baseline} 列`);
+    add("03", "靶表在不在", "FAIL", `靶表有 ${safeNum(baseline)} 列`);
     throw new ProbeAbort(
-      `中止:靶表有 ${baseline} 列,不該有這麼多。這個數字不對就是指錯地方了。`,
+      `中止:靶表有 ${safeNum(baseline)} 列,不該有這麼多。這個數字不對就是指錯地方了。` +
+        `代碼 ${ABORT.TARGET_TOO_BIG}。`,
+      ABORT.TARGET_TOO_BIG,
     );
   }
 
@@ -641,13 +889,17 @@ export async function runProbe(deps) {
   const mutable = colList.find(
     (c) => String(pick(c, "COLUMN_KEY") ?? "").toUpperCase() !== "PRI",
   );
-  // 只允許來自 information_schema 的欄名,不接受任何外部輸入。
-  const mutableCol = mutable ? String(pick(mutable, "COLUMN_NAME")) : null;
+  // 只允許來自 information_schema 的欄名,不接受任何外部輸入;而且欄名要自己再過一次
+  // 格式檢查(只認英數與底線)才准拼進 SQL 或印出來,形狀不對就當作「沒有可改欄位」,
+  // 走下面的降級判定。
+  const mutableRaw = mutable ? String(pick(mutable, "COLUMN_NAME")) : null;
+  const mutableCol =
+    mutableRaw && /^[A-Za-z0-9_]{1,64}$/.test(mutableRaw) ? mutableRaw : null;
   add(
     "03",
     "靶表在不在、乾不乾淨",
     "PASS",
-    `靶表存在,開跑前 ${baseline} 列,欄位 ${colList.length} 個` +
+    `靶表存在,開跑前 ${safeNum(baseline)} 列,欄位 ${safeNum(colList.length)} 個` +
       (mutableCol ? `,可改欄位 ${mutableCol}` : ",只有主鍵一欄"),
   );
 
@@ -688,7 +940,7 @@ export async function runProbe(deps) {
           "05",
           "網站確認資料表還在的那個查詢",
           "PASS",
-          `讀到 ${names.length} 張表,含 ${TARGET}`,
+          `讀到 ${safeNum(names.length)} 張表,含 ${TARGET}`,
           "這只證明機制在窄鑰匙身分下可用,還沒證明正式 schema 的所有表都看得到。",
         );
       } else {
@@ -696,7 +948,7 @@ export async function runProbe(deps) {
           "05",
           "網站確認資料表還在的那個查詢",
           "FAIL",
-          `讀到 ${names.length} 張表,沒看到 ${TARGET}`,
+          `讀到 ${safeNum(names.length)} 張表,沒看到 ${TARGET}`,
         );
       }
     } catch (e) {
@@ -720,7 +972,7 @@ export async function runProbe(deps) {
         "06",
         "新增一筆資料",
         insertOk ? "PASS" : "FAIL",
-        `affectedRows=${affected},用的 id=${A}`,
+        `affectedRows=${safeNum(affected)},用的 id=${safeNum(A)}`,
       );
     } catch (e) {
       add("06", "新增一筆資料", "FAIL", errSummary(e),
@@ -736,7 +988,7 @@ export async function runProbe(deps) {
         "07",
         "剛剛那筆真的存進去了",
         ok ? "PASS" : "FAIL",
-        `讀回 ${arr.length} 列`,
+        `讀回 ${safeNum(arr.length)} 列`,
         ok ? undefined : "新增沒報錯但資料沒落地,屬於靜默失敗,要查。",
       );
     } catch (e) {
@@ -762,7 +1014,7 @@ export async function runProbe(deps) {
           "08",
           "修改一筆資料",
           ok ? "PASS" : "FAIL",
-          `affectedRows=${affected},改完讀回的值=${val}`,
+          `affectedRows=${safeNum(affected)},改完讀回的值=${val === null ? "(沒有值)" : safeText(String(val))}`,
         );
       } catch (e) {
         add("08", "修改一筆資料", "FAIL", errSummary(e),
@@ -779,7 +1031,7 @@ export async function runProbe(deps) {
           "08",
           "修改一筆資料",
           "PASS",
-          `沒有被權限擋下(affectedRows=${affected})`,
+          `沒有被權限擋下(affectedRows=${safeNum(affected)})`,
           "只驗到權限,沒驗到資料真的被改(靶表只有一個欄位)。這一項是降級判定。",
         );
       } catch (e) {
@@ -808,7 +1060,7 @@ export async function runProbe(deps) {
         "09",
         "刪掉一筆資料",
         ok ? "PASS" : "FAIL",
-        `affectedRows=${affected},刪完剩 ${remain} 列`,
+        `affectedRows=${safeNum(affected)},刪完剩 ${safeNum(remain)} 列`,
       );
     } catch (e) {
       add("09", "刪掉一筆資料", "FAIL", errSummary(e),
@@ -836,7 +1088,7 @@ export async function runProbe(deps) {
           "11",
           "稽核鏈的排隊鎖,拿得到嗎",
           verdict,
-          `GET_LOCK 回傳 ${raw}`,
+          `GET_LOCK 回傳 ${safeNum(raw)}`,
           verdict === "PASS"
             ? undefined
             : verdict === "INCONCLUSIVE"
@@ -860,7 +1112,7 @@ export async function runProbe(deps) {
             "12",
             "稽核鏈的排隊鎖,放得掉嗎",
             ok ? "PASS" : "FAIL",
-            `RELEASE_LOCK 回傳 ${raw}`,
+            `RELEASE_LOCK 回傳 ${safeNum(raw)}`,
             ok
               ? undefined
               : "鎖放不掉。這條連線會帶著鎖直到逾時,下次重跑第 11 項會等 3 秒。因為用的是 canary 專屬鎖名,正式站不受影響。",
@@ -911,7 +1163,7 @@ export async function runProbe(deps) {
       "13",
       "靶場有沒有清乾淨",
       balanced ? "PASS" : "FAIL",
-      `開始 ${baseline} 列,結束 ${after ?? "?"} 列` +
+      `開始 ${safeNum(baseline)} 列,結束 ${safeNum(after)} 列` +
         (cleanupErr ? `,清理時出錯:${errSummary(cleanupErr)}` : ""),
       balanced
         ? undefined
@@ -949,7 +1201,11 @@ export async function runProbe(deps) {
     kill.note,
   );
 
-  const exitCode = results.every((r) => r.status === "PASS") ? 0 : 1;
+  // fail-closed 兩條件:每一項都 PASS,【而且】項數剛好是應有的項數(比照 9b)。
+  const exitCode =
+    results.length === EXPECTED_ITEMS && results.every((r) => r.status === "PASS")
+      ? 0
+      : 1;
   return { results, exitCode, meta };
 }
 
@@ -962,31 +1218,6 @@ function banner(line) {
   console.error(bar);
   console.error(line);
   console.error(bar);
-}
-
-/**
- * TLS 硬設定。rejectUnauthorized 與 verifyIdentity 兩個都要:
- * mysql2 3.16.1 的 lib/base/connection.js 會把 checkServerIdentity 換成永遠回
- * undefined 的空函式,除非傳 verifyIdentity,也就是只寫 rejectUnauthorized
- * 只驗簽發鏈、不核對主機名。
- */
-const TLS = {
-  rejectUnauthorized: true,
-  verifyIdentity: true,
-  minVersion: "TLSv1.2",
-};
-
-function connOptions(u) {
-  return {
-    host: u.hostname,
-    port: u.port ? Number(u.port) : 4000,
-    user: decodeURIComponent(u.username),
-    password: decodeURIComponent(u.password),
-    database: u.pathname.replace(/^\//, ""),
-    ssl: TLS,
-    multipleStatements: false,
-    connectTimeout: 15000,
-  };
 }
 
 /** 從活著的連線上取真實 TLS 證據(不是我們送進去的設定值)。 */
@@ -1035,19 +1266,23 @@ async function main() {
   // 才檢查:連線字串貼錯時,密碼在這裡就被擋住,連送都不會送出去。
   const pre = preflight(url);
   if (!pre.ok) {
+    // pre.reason 一定是 PREFLIGHT_REASON 裡的固定字串,pre.code 是穩定代碼。
+    // 這兩樣以外什麼都不印 —— 尤其不印「你貼的是什麼」(那正是 critical 的成因)。
     banner(
       `[canary-probe] 中止(還沒連線,密碼沒有送出去):${pre.reason}\n` +
         `  代碼:${pre.code}`,
     );
     process.exit(1);
   }
-  const u = pre.u;
+  const connOpts = connOptionsFor(pre);
 
-  console.log(`[canary-probe] 連線中:${u.hostname}`);
+  // 主機名已經在 preflight 過了白名單;這裡再套一次 safeHost,單純是不想讓
+  // 「輸出點有沒有白名單」這件事依賴呼叫順序。
+  console.log(`[canary-probe] 連線中:${safeHost(pre.host)}`);
   let conn;
   try {
     conn = await raceWithTimeout(
-      () => mysql.createConnection(connOptions(u)),
+      () => mysql.createConnection(connOpts),
       HANDSHAKE_TIMEOUT_MS,
       `連了 ${HANDSHAKE_TIMEOUT_MS / 1000} 秒還沒完成 MySQL 交握(對方接了 TCP 卻不講 MySQL,多半是 port 打錯)`,
     );
@@ -1074,7 +1309,7 @@ async function main() {
   // KILL 用的拋棄式連線:同一組 TLS 設定,並重跑身分/靶場防呆。
   const killProbe = async () => {
     const kc = await raceWithTimeout(
-      () => mysql.createConnection(connOptions(u)),
+      () => mysql.createConnection(connOpts),
       HANDSHAKE_TIMEOUT_MS,
       `KILL 探測連線 ${HANDSHAKE_TIMEOUT_MS / 1000} 秒還沒完成 MySQL 交握`,
     );
@@ -1089,7 +1324,9 @@ async function main() {
       const dbn = String(pick(row, "db") ?? "?");
       if (!/app_runtime/i.test(cu) || dbn !== SCHEMA) {
         throw new ProbeAbort(
-          `KILL 探測連線的身分/靶場不對(${cu} / ${dbn}),不執行。`,
+          `KILL 探測連線的身分/靶場不對(${safeIdent(cu)} / ${safeIdent(dbn)}),不執行。` +
+            `代碼 ${ABORT.KILL_PROBE_IDENTITY}。`,
+          ABORT.KILL_PROBE_IDENTITY,
         );
       }
       await kc.query("KILL CONNECTION_ID()");
@@ -1132,7 +1369,7 @@ async function main() {
   }
 
   console.log("");
-  console.log(renderReport(outcome.results, { ...outcome.meta, host: u.hostname }));
+  console.log(renderReport(outcome.results, { ...outcome.meta, host: pre.host }));
   process.exit(outcome.exitCode);
 }
 

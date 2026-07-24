@@ -11,7 +11,8 @@
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { spawnSync } from "node:child_process";
+import { fileURLToPath } from "node:url";
 import {
   runProbe,
   classifyLockResult,
@@ -25,8 +26,21 @@ import {
   TARGET,
   LOCK_NAME,
   SCHEMA,
+  EXPECTED_ITEMS,
   PREFLIGHT,
+  PREFLIGHT_REASON,
+  PREFLIGHT_FIELD,
+  REQUIRED_SCHEME,
   preflight,
+  connOptionsFor,
+  isSafeHostname,
+  isSafeIdent,
+  isSafeText,
+  safeHost,
+  safeIdent,
+  safeText,
+  safeNum,
+  UNSAFE_PLACEHOLDER,
   raceWithTimeout,
   installProcessGuards,
   attachConnErrorGuard,
@@ -580,12 +594,22 @@ test("preflight accepts exactly one thing: schema === canary", () => {
   assert.ok(r.u instanceof URL);
 });
 
-test("preflight rejects the near-miss schema canary_backup", () => {
+test("preflight rejects the near-miss schema canary_backup, without echoing it back", () => {
   const r = preflight(URL_WITH("/canary_backup"));
   assert.equal(r.ok, false);
   assert.equal(r.code, PREFLIGHT.SCHEMA_MISMATCH);
   assert.match(r.reason, /剛好是 'canary'/);
-  assert.match(r.reason, /canary_backup/);
+  // 零回吐:拒絕訊息是固定字串,不准把「目前是什麼」貼回去。
+  // 舊版就是在這裡把整串憑證印出來的(少一條斜線時 schema 名 === 整串連線字串)。
+  // 判準不是「訊息裡有沒有出現某個字」(訊息本身就舉了 canary_backup 當例子),
+  // 而是「訊息完全不隨輸入變動」:換一條輸入,拿到的必須是同一句話。
+  assert.equal(r.reason, PREFLIGHT_REASON.SCHEMA_MISMATCH);
+  for (const other of ["/canary2", "/CANARY", "/prod", "/ZQX9SENTINEL_schema"]) {
+    const r2 = preflight(URL_WITH(other));
+    assert.equal(r2.code, PREFLIGHT.SCHEMA_MISMATCH, other);
+    assert.equal(r2.reason, r.reason, `拒絕訊息隨輸入變了:${other}`);
+    assert.ok(!r2.reason.includes("ZQX9SENTINEL"), other);
+  }
 });
 
 test("preflight rejects the production schema test, in any casing", () => {
@@ -838,26 +862,467 @@ test("attachConnErrorGuard is a no-op on something that is not an emitter", () =
   assert.equal(attachConnErrorGuard({}, "[x]"), false);
 });
 
+
 // ---------------------------------------------------------------------------
-// 9a 的結構事實:防呆擋在連線之前,三條通道都有人接
+// 白名單化:零回吐政策唯一允許的例外
 // ---------------------------------------------------------------------------
 
-test("9a calls preflight before it prints 連線中 or opens a connection", () => {
-  // 整行註解一律丟掉:不然把防線註解掉的突變會因為註解裡還留著那行字而測不出來。
-  const src = readFileSync(
-    new URL("./canary-runtime-probe.mjs", import.meta.url),
-    "utf8",
-  )
-    .split("\n")
-    .filter((l) => !/^\s*(\/\/|\*|\/\*)/.test(l))
-    .join("\n");
-  const preIdx = src.indexOf("preflight(url)");
-  const connIdx = src.indexOf("連線中:");
-  const createIdx = src.indexOf("mysql.createConnection");
-  assert.ok(preIdx > 0, "9a 沒有呼叫 preflight");
-  assert.ok(connIdx > preIdx, "「連線中」印在 preflight 之前,密碼會先送出去");
-  assert.ok(createIdx > preIdx, "createConnection 排在 preflight 之前");
-  assert.match(src, /installProcessGuards\("\[canary-probe\]"\)/);
-  assert.match(src, /attachConnErrorGuard\(conn, "\[canary-probe\]"/);
-  assert.match(src, /raceWithTimeout\(/);
+test("isSafeHostname 只放行英數與點、減號", () => {
+  for (const ok of ["gw.example.com", "a", "GW-1.tidbcloud.com", "127.0.0.1"]) {
+    assert.equal(isSafeHostname(ok), true, ok);
+  }
+  for (const bad of [
+    "gw_evil.example.com", // 底線
+    "gw.example.com:4000", // 冒號
+    "u:pw@gw.example.com", // 整串 userinfo
+    "[::1]", // IPv6 的中括號
+    "gw example.com", // 空白
+    "",
+    null,
+    undefined,
+    123,
+    "a".repeat(254), // 超過長度上限
+  ]) {
+    assert.equal(isSafeHostname(bad), false, String(bad));
+  }
+});
+
+test("safeHost / safeIdent / safeText 通不過就印固定佔位字串,不印原值", () => {
+  assert.equal(safeHost("gw.example.com"), "gw.example.com");
+  assert.equal(safeHost("gw_ZQX9SENTINEL.example.com"), UNSAFE_PLACEHOLDER);
+  assert.equal(safeIdent("prefix.app_runtime@%"), "prefix.app_runtime@%");
+  assert.equal(safeIdent("mysql://u:ZQX9SENTINEL@h/canary"), UNSAFE_PLACEHOLDER);
+  assert.equal(safeText("Let's Encrypt"), "Let's Encrypt");
+  assert.equal(safeText("u:ZQX9SENTINEL@h"), UNSAFE_PLACEHOLDER);
+});
+
+test("safeIdent 的字元集擋掉所有連線字串形狀(冒號與斜線都不在裡面)", () => {
+  for (const shape of [
+    "mysql://prefix.app_runtime:ZQX9SENTINEL@gw.example.com:4000/canary",
+    "mysql:prefix.app_runtime:ZQX9SENTINEL@gw.example.com:4000/canary",
+    "prefix.app_runtime:ZQX9SENTINEL@gw.example.com:4000/canary",
+  ]) {
+    assert.equal(isSafeIdent(shape), false, shape);
+    assert.ok(!safeIdent(shape).includes("ZQX9SENTINEL"), shape);
+  }
+});
+
+test("safeNum 不把「沒有值」變成 0", () => {
+  assert.equal(safeNum(0), "0");
+  assert.equal(safeNum(13), "13");
+  assert.equal(safeNum(null), "?");
+  assert.equal(safeNum(undefined), "?");
+  assert.equal(safeNum(""), "?");
+  assert.equal(safeNum("ZQX9SENTINEL"), "?");
+  assert.equal(safeNum(NaN), "?");
+});
+
+test("isSafeText 擋掉冒號、斜線、@", () => {
+  assert.equal(isSafeText("Let's Encrypt"), true);
+  assert.equal(isSafeText("DigiCert Inc"), true);
+  assert.equal(isSafeText("a:b"), false);
+  assert.equal(isSafeText("a/b"), false);
+  assert.equal(isSafeText("a@b"), false);
+});
+
+// ---------------------------------------------------------------------------
+// scheme 前置檢查(必須擋在 new URL() 之前)
+// ---------------------------------------------------------------------------
+
+test("preflight 要求字面 mysql://(少一條斜線就是 BAD_URL,不是 SCHEMA_MISMATCH)", () => {
+  const r = preflight("mysql:prefix.app_runtime:ZQX9SENTINEL@gw.example.com:4000/canary");
+  assert.equal(r.ok, false);
+  assert.equal(r.code, PREFLIGHT.BAD_URL);
+  assert.equal(r.reason, PREFLIGHT_REASON.BAD_SCHEME);
+  assert.ok(!r.reason.includes("ZQX9SENTINEL"));
+});
+
+test("preflight 擋掉非 mysql 的 scheme 與完全沒有 scheme 的字串", () => {
+  for (const raw of [
+    "postgres://prefix.app_runtime:ZQX9SENTINEL@gw.example.com:5432/canary",
+    "prefix.app_runtime:ZQX9SENTINEL@gw.example.com:4000/canary",
+    "//prefix.app_runtime:ZQX9SENTINEL@gw.example.com:4000/canary",
+    "mysql:/prefix.app_runtime:ZQX9SENTINEL@gw.example.com:4000/canary",
+    "mysqlx://prefix.app_runtime:ZQX9SENTINEL@gw.example.com:4000/canary",
+  ]) {
+    const r = preflight(raw);
+    assert.equal(r.ok, false, raw);
+    assert.equal(r.code, PREFLIGHT.BAD_URL, raw);
+    assert.ok(!r.reason.includes("ZQX9SENTINEL"), raw);
+  }
+});
+
+test("REQUIRED_SCHEME 就是 mysql://,兩條斜線都在", () => {
+  assert.equal(REQUIRED_SCHEME, "mysql://");
+});
+
+test("preflight 擋掉格式不合的主機名(BAD_HOST),連印都不印", () => {
+  for (const raw of [
+    "mysql://prefix.app_runtime:pw@gw_ZQX9SENTINEL.example.com:4000/canary",
+    "mysql:///canary",
+  ]) {
+    const r = preflight(raw);
+    assert.equal(r.ok, false, raw);
+    assert.equal(r.code, PREFLIGHT.BAD_HOST, raw);
+    assert.equal(r.reason, PREFLIGHT_REASON.BAD_HOST);
+    assert.ok(!r.reason.includes("ZQX9SENTINEL"), raw);
+  }
+});
+
+test("preflight 通過時回報的 host 一定過得了白名單", () => {
+  const r = preflight(URL_WITH("/canary"));
+  assert.equal(r.ok, true);
+  assert.equal(isSafeHostname(r.host), true);
+});
+
+test("preflight 的 BAD_ENCODING 用固定枚舉標示是哪一段", () => {
+  const r = preflight("mysql://prefix.app_runtime:p%ssZQX9SENTINEL@gw.example.com:4000/canary");
+  assert.equal(r.code, PREFLIGHT.BAD_ENCODING);
+  assert.equal(r.field, PREFLIGHT_FIELD.PASSWORD);
+  assert.equal(r.reason, PREFLIGHT_REASON.BAD_ENCODING_PASSWORD);
+  assert.ok(!r.reason.includes("ZQX9SENTINEL"));
+});
+
+test("preflight 的每一句拒絕訊息都來自固定字串表(不是拼出來的)", () => {
+  const fixed = new Set(Object.values(PREFLIGHT_REASON));
+  const cases = [
+    "   ",
+    "mysql:prefix.app_runtime:ZQX9SENTINEL@gw.example.com:4000/canary",
+    "prefix.app_runtime:ZQX9SENTINEL@gw.example.com:4000/canary",
+    "postgres://prefix.app_runtime:ZQX9SENTINEL@gw.example.com:5432/canary",
+    "mysql://prefix.app_runtime:ZQX9SENTINEL@gw.example.com:99999/canary",
+    "mysql://prefix.app_runtime:pw@gw_ZQX9SENTINEL.example.com:4000/canary",
+    "mysql://prefix.app_runtime:p%ssZQX9SENTINEL@gw.example.com:4000/canary",
+    "mysql://prefix.app_runtime:ZQX9SENTINEL@gw.example.com:4000",
+    "mysql://prefix.app_runtime:ZQX9SENTINEL@gw.example.com:4000/test",
+    "mysql://prefix.app_runtime:ZQX9SENTINEL@gw.example.com:4000/canary_backup",
+    "mysql://prefix.app_runtime:ZQX9SENTINEL@gw.example.com:4000/canary?rejectUnauthorized=false",
+    "mysql://prefix.app_runtime:ZQX9SENTINEL@gw.example.com:4000/mysql://u:p@evil/canary",
+  ];
+  for (const raw of cases) {
+    const r = preflight(raw);
+    assert.equal(r.ok, false, raw);
+    assert.ok(fixed.has(r.reason), `拒絕訊息不在固定字串表裡(代表是拼出來的):${raw}`);
+  }
+});
+
+// ---------------------------------------------------------------------------
+// connOptionsFor:9a / 9b 共用,schema 解碼標準只有一個
+// ---------------------------------------------------------------------------
+
+test("connOptionsFor 的 database 用 preflight 解碼並核對過的 schema", () => {
+  const pre = preflight(URL_WITH("/canary"));
+  const o = connOptionsFor(pre);
+  assert.equal(o.database, SCHEMA);
+  assert.equal(o.host, "gw.example.com");
+  assert.equal(o.port, 4000);
+  assert.equal(o.user, "prefix.app_runtime");
+  assert.equal(o.password, "ZQX9SENTINEL");
+  assert.equal(o.ssl.rejectUnauthorized, true);
+  assert.equal(o.ssl.verifyIdentity, true);
+  assert.equal(o.multipleStatements, false);
+});
+
+test("connOptionsFor 對百分比編碼的 schema 與 preflight 用同一套解碼", () => {
+  // /can%61ry 解碼後就是 canary,preflight 放行,連線選項也必須送出解碼後的名字。
+  const pre = preflight("mysql://prefix.app_runtime:pw@gw.example.com:4000/can%61ry");
+  assert.equal(pre.ok, true);
+  assert.equal(pre.schema, SCHEMA);
+  assert.equal(connOptionsFor(pre).database, SCHEMA);
+});
+
+// ---------------------------------------------------------------------------
+// redact 第二道網:沒有 :// 的 userinfo 形狀與跨行憑證
+// ---------------------------------------------------------------------------
+
+test("redact 吃得掉沒有 :// 的 userinfo 形狀(2026-07-23 critical 的形狀)", () => {
+  const shapes = [
+    "mysql:prefix.app_runtime:ZQX9SENTINEL@gw.example.com:4000/canary",
+    "prefix.app_runtime:ZQX9SENTINEL@gw.example.com:4000/canary",
+    "目前是 'prefix.app_runtime:ZQX9SENTINEL@gw.example.com:4000/canary'",
+    "schema=prefix.app_runtime:ZQX9SENTINEL@gw.example.com:4000/canary",
+  ];
+  for (const s of shapes) {
+    const out = redact(s);
+    assert.ok(!out.includes("ZQX9SENTINEL"), `沒遮掉:${out}`);
+    assert.ok(out.includes("***:***@"), `沒有遮蔽標記:${out}`);
+  }
+});
+
+test("redact 吃得掉跨行的憑證", () => {
+  for (const s of [
+    "mysql://prefix.app_runtime:ZQX9SENTINEL\n@gw.example.com:4000/canary",
+    "prefix.app_runtime:ZQX9SENTINEL\n@gw.example.com:4000/canary",
+    "prefix.app_runtime:ZQX9\nSENTINEL@gw.example.com:4000/canary",
+  ]) {
+    const out = redact(s);
+    assert.ok(!out.includes("ZQX9SENTINEL"), `沒遮掉:${JSON.stringify(out)}`);
+  }
+});
+
+test("redact 不會把已經遮好的字串再啃掉 scheme,也不動正常的錯誤摘要", () => {
+  assert.equal(
+    redact("mysql://***:***@gw.example.com:4000/canary"),
+    "mysql://***:***@gw.example.com:4000/canary",
+  );
+  const summary =
+    "code=ER_ACCESS_DENIED errno=1045 sqlState=28000 " +
+    "msg=Access denied for user 'app_runtime'@'%' (using password: YES)";
+  assert.equal(redact(summary), summary);
+  assert.equal(redact("code=ETIMEDOUT msg=connect ETIMEDOUT 10.0.0.1:4000"),
+    "code=ETIMEDOUT msg=connect ETIMEDOUT 10.0.0.1:4000");
+});
+
+// ---------------------------------------------------------------------------
+// 項數:每一項都 PASS 不等於該跑的都跑了(比照 9b 的 results.length === PROBES.length)
+// ---------------------------------------------------------------------------
+
+test("EXPECTED_ITEMS 就是文件裡的 14 項,而且全綠那次真的跑滿", async () => {
+  assert.equal(EXPECTED_ITEMS, 14);
+  const { results, exitCode } = await run();
+  assert.equal(results.length, EXPECTED_ITEMS);
+  assert.equal(exitCode, 0);
+});
+
+test("項數少了就算每一項都 PASS 也不准印「全部通過」", () => {
+  const short = [{ no: "01", label: "a", status: "PASS", evidence: "e" }];
+  const out = renderReport(short, { schema: "canary", user: "u", host: "h", baseline: 0, after: 0 });
+  assert.ok(!/全部 1 項通過/.test(out), "項數不足卻報全部通過");
+  assert.match(out, /項數不對/);
+  assert.match(out, /應該有 14 項/);
+});
+
+test("成績單抬頭的三個值也走白名單", () => {
+  const out = renderReport(
+    [{ no: "01", label: "a", status: "PASS" }],
+    {
+      schema: "mysql://u:ZQX9SENTINEL@h/canary",
+      user: "mysql://u:ZQX9SENTINEL@h/canary",
+      host: "gw_ZQX9SENTINEL.example.com",
+      baseline: 0,
+      after: 0,
+    },
+  );
+  assert.ok(!out.includes("ZQX9SENTINEL"), `成績單抬頭回吐了輸入:${out}`);
+});
+
+// ---------------------------------------------------------------------------
+// 行為測試(真的 spawn 子行程跑腳本)
+//
+// 為什麼不用結構測試:2026-07-23 的對抗審查實測證明,「用正規式檢查原始碼有沒有
+// 那一行」可以被兩種改法繞過 —— 把防線用行尾註解掉,或包進 if (false) —— 繞過去
+// 之後結構測試全綠,但哨兵密碼真的印在畫面上(審查者實測命中 2 次)。
+// 下面這些測試餵真的壞連線字串給真的腳本,斷言 stdout + stderr 完全不含哨兵。
+// 註解掉防線、if (false) 包起來、把函式改成 return 空字串,一律會轉紅。
+//
+// 註:這個 spawn 小工具在 9a / 9b 兩個測試檔各有一份。測試檔之間互相 import 會讓
+// 對方的測項被跑兩次,所以這裡刻意各自保留一份,而不是抽成共用模組。
+// ---------------------------------------------------------------------------
+
+const SENTINEL = "ZQX9SENTINEL";
+const SCRIPT_PATH = fileURLToPath(new URL("./canary-runtime-probe.mjs", import.meta.url));
+
+/** 跑一次腳本,回傳 { code, out }。out 是 stdout 與 stderr 合起來的全部輸出。 */
+function runScript(url) {
+  const env = { ...process.env };
+  if (url === undefined) delete env.CANARY_APP_RUNTIME_DATABASE_URL;
+  else env.CANARY_APP_RUNTIME_DATABASE_URL = url;
+  const r = spawnSync(process.execPath, [SCRIPT_PATH], {
+    encoding: "utf8",
+    env,
+    timeout: 60_000,
+  });
+  return { code: r.status, out: `${r.stdout ?? ""}${r.stderr ?? ""}` };
+}
+
+/** 未遮蔽的 userinfo 形狀(有 scheme 的與沒 scheme 的都算)。 */
+const UNMASKED_CREDENTIAL =
+  /(^|[^A-Za-z0-9._~%+\-:/])[A-Za-z0-9._~%+-]{1,64}:[^\s@/]{1,256}@/;
+
+function assertNoLeak(name, out) {
+  assert.ok(!out.includes(SENTINEL), `${name}:哨兵密碼出現在輸出裡\n${out}`);
+  assert.ok(
+    !UNMASKED_CREDENTIAL.test(out.replace(/\*\*\*:\*\*\*@/g, "")),
+    `${name}:輸出裡有未遮蔽的 user:pass@host 形狀\n${out}`,
+  );
+}
+
+/**
+ * 壞連線字串矩陣。每一條都夾著哨兵密碼 ZQX9SENTINEL(或把哨兵放在主機名裡),
+ * 全部必須:exit 1、輸出零哨兵、而且印出預期的穩定代碼。
+ */
+const BAD_INPUTS = [
+  {
+    name: "缺一條斜線(整串憑證會掉進 pathname,這就是 2026-07-23 的 critical)",
+    url: `mysql:prefix.app_runtime:${SENTINEL}@gw.example.com:4000/canary`,
+    code: "BAD_URL",
+  },
+  {
+    name: "完全沒有 scheme",
+    url: `prefix.app_runtime:${SENTINEL}@gw.example.com:4000/canary`,
+    code: "BAD_URL",
+  },
+  {
+    name: "scheme 不是 mysql",
+    url: `postgres://prefix.app_runtime:${SENTINEL}@gw.example.com:5432/canary`,
+    code: "BAD_URL",
+  },
+  {
+    name: "schema 不符(canary_backup)",
+    url: `mysql://prefix.app_runtime:${SENTINEL}@gw.example.com:4000/canary_backup`,
+    code: "SCHEMA_MISMATCH",
+  },
+  {
+    name: "schema 名本身夾著哨兵(拒絕訊息若回吐 schema 名就會漏)",
+    url: `mysql://prefix.app_runtime:pw@gw.example.com:4000/canary_${SENTINEL}`,
+    code: "SCHEMA_MISMATCH",
+  },
+  {
+    name: "整條連線字串被塞進 path 段(schema 名 === 一整串憑證)",
+    url: `mysql://prefix.app_runtime:pw@gw.example.com:4000/mysql://u:${SENTINEL}@evil/canary`,
+    code: "SCHEMA_MISMATCH",
+  },
+  {
+    name: "schema 大小寫不同(Canary)",
+    url: `mysql://prefix.app_runtime:${SENTINEL}@gw.example.com:4000/Canary`,
+    code: "SCHEMA_MISMATCH",
+  },
+  {
+    name: "正式 schema(test)",
+    url: `mysql://prefix.app_runtime:${SENTINEL}@gw.example.com:4000/test`,
+    code: "PROD_SCHEMA",
+  },
+  {
+    name: "完全沒有 schema",
+    url: `mysql://prefix.app_runtime:${SENTINEL}@gw.example.com:4000`,
+    code: "NO_SCHEMA",
+  },
+  { name: "只有空白的連線字串", url: "   ", code: "EMPTY_URL" },
+  {
+    name: "壞 port(99999)",
+    url: `mysql://prefix.app_runtime:${SENTINEL}@gw.example.com:99999/canary`,
+    code: "BAD_URL",
+  },
+  {
+    name: "密碼含 %",
+    url: `mysql://prefix.app_runtime:p%ss${SENTINEL}@gw.example.com:4000/canary`,
+    code: "BAD_ENCODING",
+  },
+  {
+    name: "密碼含 @",
+    url: `mysql://prefix.app_runtime:p@ss${SENTINEL}@gw.example.com:4000/canary_backup`,
+    code: "SCHEMA_MISMATCH",
+  },
+  {
+    name: "密碼含空白",
+    url: `mysql://prefix.app_runtime:p ss${SENTINEL}@gw.example.com:4000/canary_backup`,
+    code: "SCHEMA_MISMATCH",
+  },
+  {
+    name: "密碼含斜線",
+    url: `mysql://prefix.app_runtime:p/ss${SENTINEL}@gw.example.com:4000/canary`,
+    code: "BAD_URL",
+  },
+  {
+    name: "密碼含 tab",
+    url: `mysql://prefix.app_runtime:p\tss${SENTINEL}@gw.example.com:4000/canary_backup`,
+    code: "SCHEMA_MISMATCH",
+  },
+  {
+    name: "密碼含換行",
+    url: `mysql://prefix.app_runtime:p\nss${SENTINEL}@gw.example.com:4000/canary_backup`,
+    code: "SCHEMA_MISMATCH",
+  },
+  {
+    name: "想把 TLS 憑證驗證關掉",
+    url: `mysql://prefix.app_runtime:${SENTINEL}@gw.example.com:4000/canary?rejectUnauthorized=false`,
+    code: "TLS_DISABLED",
+  },
+  {
+    name: "主機名格式不合(底線),哨兵藏在主機名裡",
+    url: `mysql://prefix.app_runtime:pw@gw_${SENTINEL}.example.com:4000/canary`,
+    code: "BAD_HOST",
+  },
+  {
+    name: "DNS 查無主機(會真的去連,連不上)",
+    url: `mysql://prefix.app_runtime:${SENTINEL}@gw.canary-probe.invalid:4000/canary`,
+    code: null, // 過得了 preflight,錯在連線層
+  },
+];
+
+for (const c of BAD_INPUTS) {
+  test(`行為測試 9a:${c.name} → 中止且輸出零哨兵`, () => {
+    const { code, out } = runScript(c.url);
+    assert.equal(code, 1, `${c.name}:退出碼應為 1\n${out}`);
+    assertNoLeak(c.name, out);
+    if (c.code) {
+      assert.ok(
+        out.includes(`代碼:${c.code}`),
+        `${c.name}:沒有印出穩定代碼 ${c.code}\n${out}`,
+      );
+    }
+  });
+}
+
+test("行為測試 9a:沒設 env 時無害跳過(exit 2)", () => {
+  const { code, out } = runScript(undefined);
+  assert.equal(code, 2, out);
+  assert.match(out, /SKIPPED/);
+  assertNoLeak("未設 env", out);
+});
+
+test("行為測試 9a:env 設成空字串也是無害跳過(exit 2)", () => {
+  const { code, out } = runScript("");
+  assert.equal(code, 2, out);
+  assert.match(out, /SKIPPED/);
+});
+
+test("行為測試 9a:所有壞輸入都不會走到連線那一步(除了 DNS 那一條)", () => {
+  for (const c of BAD_INPUTS) {
+    if (c.code === null) continue; // DNS 那條本來就該連
+    const { out } = runScript(c.url);
+    assert.ok(
+      !out.includes("連線中:"),
+      `${c.name}:preflight 沒擋住,已經開始連線了\n${out}`,
+    );
+    assert.ok(out.includes("還沒連線,密碼沒有送出去"), c.name);
+  }
+});
+
+test("行為測試:process 級攔截不會把掛在 error 上的連線字串印出來(子行程實跑)", () => {
+  const src = [
+    `import { installProcessGuards } from ${JSON.stringify(SCRIPT_PATH)};`,
+    `installProcessGuards("[canary-probe]");`,
+    `setTimeout(() => {`,
+    `  const e = new TypeError("Invalid URL");`,
+    `  e.code = "ERR_INVALID_URL";`,
+    `  e.input = "mysql://prefix.app_runtime:${SENTINEL}@gw.example.com:4000/canary";`,
+    `  throw e;`,
+    `}, 0);`,
+  ].join("\n");
+  const r = spawnSync(process.execPath, ["--input-type=module", "-e", src], {
+    encoding: "utf8",
+    timeout: 60_000,
+  });
+  const out = `${r.stdout ?? ""}${r.stderr ?? ""}`;
+  assert.equal(r.status, 1, out);
+  assert.ok(out.includes("code=ERR_INVALID_URL"), out);
+  assertNoLeak("process 級攔截", out);
+});
+
+test("行為測試:redact 這道第二道網在子行程裡也吃得掉兩種形狀", () => {
+  const src = [
+    `import { redact } from ${JSON.stringify(SCRIPT_PATH)};`,
+    `console.log(redact("connect failed for prefix.app_runtime:${SENTINEL}@gw.example.com:4000/canary"));`,
+    `console.log(redact("prefix.app_runtime:${SENTINEL}\\n@gw.example.com:4000/canary"));`,
+    `console.log(redact("mysql://prefix.app_runtime:${SENTINEL}\\n@gw.example.com:4000/canary"));`,
+  ].join("\n");
+  const r = spawnSync(process.execPath, ["--input-type=module", "-e", src], {
+    encoding: "utf8",
+    timeout: 60_000,
+  });
+  const out = `${r.stdout ?? ""}${r.stderr ?? ""}`;
+  assert.equal(r.status, 0, out);
+  assertNoLeak("redact 第二道網", out);
+  assert.equal((out.match(/\*\*\*:\*\*\*@/g) ?? []).length, 3, out);
 });
