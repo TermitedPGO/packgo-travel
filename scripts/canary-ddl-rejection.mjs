@@ -31,13 +31,14 @@
  *      errSummary() 只取白名單欄位(絕不印原始 error 物件 —— Node 的 ERR_INVALID_URL
  *      會把完整連線字串掛在 `input` 這個 own enumerable 屬性上);redact() 是第二道網,
  *      不是主要防線。兩者實作與單測都在 9a,本檔直接 import,不另抄一份。
- *   5. 收尾一定要交代靶場狀態:本次有沒有建出/改動任何東西、清掉了沒有、還剩什麼、
- *      剩的要怎麼手動清。清理結果一律【回頭查 information_schema 複核】,不接受自報。
+ *   5. 收尾一定交代靶場狀態:本次有沒有建出/改動任何東西、清掉了沒有、還剩什麼;
+ *      殘留項以結構化清單輸出(表名 + 建議修復 SQL 作為資料欄位)。清理結果一律
+ *      【回頭查 information_schema 複核】,不接受自報。
  *
  * 本批【不實跑】:prod 無 canary、app_runtime 角色尚未建立(見 docs/infra/db-role-hardening.md)。
  * 人工驗證不走這支腳本(2026-07-23 Jeff 裁定)。canary 的人工驗證一律走桌面指南
  * 步驟 9(標準 mysql 客戶端):~/Desktop/PACKGO_AI交流/網站專案/DB加固_後台操作指南.md
- * 步驟 9 第二組「反向 DDL 四行」。不要手動貼含密碼的連線字串來跑這支腳本。
+ * 步驟 9 第二組「反向 DDL 四行」。本腳本不供人手執行,連線字串由設定檔供給。
  *
  * 本腳本僅保留供【未來自動化】使用:屆時 CANARY_APP_RUNTIME_DATABASE_URL 由設定檔 /
  * 密鑰庫供給給自動化流程(非人手輸入),自動化流程再執行 `node scripts/canary-ddl-rejection.mjs`,
@@ -83,7 +84,7 @@ export const CREATE_PROBE = "canary_ddl_probe_should_not_exist";
 // ALTER 探測會加上去的欄名(若竟被加上 = P0)。
 export const ADDED_COL = "canary_added_col";
 
-/** 殘留物的手動清除指令(給 Jeff 貼進 TiDB SQL 編輯器,用 migrator 身分跑)。 */
+/** 殘留物的建議修復 SQL(結構化資料;由 migrator 身分的標準客戶端或自動化流程套用)。 */
 export const MANUAL = {
   probeTable: "DROP TABLE IF EXISTS `canary`.`canary_ddl_probe_should_not_exist`;",
   addedCol: "ALTER TABLE `canary`.`canary_probe_target` DROP COLUMN `canary_added_col`;",
@@ -91,7 +92,7 @@ export const MANUAL = {
 };
 
 // 四類 DDL 探測。sql 一律字串常量,不插值任何外部輸入(地雷 #7 紀律)。
-// undo = DDL 竟然成功時把副作用收回來的還原語句;null 代表還原不了,只能請 Jeff 重佈。
+// undo = DDL 竟然成功時把副作用收回來的還原語句;null 代表還原不了,只能由 migrator 重佈。
 export const PROBES = [
   {
     kind: "CREATE",
@@ -116,7 +117,7 @@ export const PROBES = [
     undo: null,
     undoDesc: "清空沒辦法自動還原",
     manual:
-      "表結構還在、內容沒了。要補回探測列請依 docs/infra/db-role-hardening.md,用 migrator 身分重灌。",
+      "表結構仍在、內容已清空。補回探測列的程序見 docs/infra/db-role-hardening.md(migrator 身分重灌)。",
   },
   {
     kind: "DROP",
@@ -207,7 +208,7 @@ export async function cleanupAndReport(conn, sideEffects) {
   for (const se of sideEffects) {
     console.log("[canary-ddl] 需要清理:" + se.effect);
     if (!se.undo) {
-      console.log("[canary-ddl] 清理結果:❌ " + se.undoDesc + ",要手動處理:");
+      console.log("[canary-ddl] 清理結果:❌ " + se.undoDesc + "(還原不了,建議修復 SQL 如下):");
       console.log("            " + se.manual);
       continue;
     }
@@ -216,7 +217,7 @@ export async function cleanupAndReport(conn, sideEffects) {
       console.log("[canary-ddl] 清理結果:✅ 已" + se.undoDesc + "(下面再複核一次)");
     } catch (e) {
       console.log("[canary-ddl] 清理結果:❌ " + se.undoDesc + "失敗:" + errSummary(e));
-      console.log("[canary-ddl] 請手動執行(TiDB SQL 編輯器,用 migrator 身分):");
+      console.log("[canary-ddl] 建議修復 SQL(migrator 身分的標準客戶端或自動化流程套用):");
       console.log("            " + se.manual);
     }
   }
@@ -227,7 +228,7 @@ export async function cleanupAndReport(conn, sideEffects) {
   } catch (e) {
     console.log("[canary-ddl] 清理複核查不動:" + errSummary(e));
     console.log(
-      "[canary-ddl] 請自行到 TiDB 確認 " + TARGET + " 與 " + CREATE_PROBE + " 的狀態。",
+      "[canary-ddl] " + TARGET + " 與 " + CREATE_PROBE + " 的狀態未取得(複核查詢失敗)。",
     );
     return false;
   }
@@ -255,7 +256,7 @@ export async function cleanupAndReport(conn, sideEffects) {
     return false;
   }
 
-  console.log("[canary-ddl] 清理複核:⚠️  還有殘留,請手動清:");
+  console.log("[canary-ddl] 清理複核:⚠️  還有殘留(表名 + 建議修復 SQL 如下):");
   for (const l of leftovers) {
     console.log("            - " + l.what);
     console.log("              " + l.manual);
@@ -297,7 +298,7 @@ export async function run(conn) {
   }
   if (/^test$/i.test(dbName)) {
     banner(
-      "[canary-ddl] 中止:你把正式 schema(test)貼進來了。絕不准對正式站跑。" +
+      "[canary-ddl] 中止:偵測到正式 schema(test)。絕不准對正式站跑。" +
         "代碼 ABORT_PROD_SCHEMA。",
     );
     return 1;
@@ -326,7 +327,7 @@ export async function run(conn) {
           "  SQL: " + probe.sql + "\n" +
           "  副作用: " + probe.effect + "\n" +
           "  權限隔離未生效 —— 立即停測,不續試其餘 DDL。這是 2026-06-17 tours 清空的結構成因。\n" +
-          "  處置:撤掉 app_runtime 的 DDL 權限(見 docs/infra/db-role-hardening.md)後重驗。",
+          "  處置:撤掉 app_runtime 的 DDL 權限(見 docs/infra/db-role-hardening.md),之後由自動化流程重新驗證。",
       );
       break;
     } catch (e) {
@@ -366,7 +367,7 @@ export async function run(conn) {
   if (p0) {
     banner(
       "[canary-ddl] 未通過(P0):" + p0.kind + " 竟然成功,權限隔離沒生效。" +
-        (clean ? "副作用已清乾淨。" : "副作用沒清乾淨,見上面的手動清除指令。"),
+        (clean ? "副作用已清乾淨。" : "副作用沒清乾淨,見上方結構化殘留清單與建議修復 SQL。"),
     );
     return 1;
   }
@@ -379,10 +380,10 @@ export async function run(conn) {
     return 0;
   }
   if (allRejected && !clean) {
-    banner("[canary-ddl] 未通過:四類 DDL 雖然全被拒,但靶場有殘留/複核不過。照上面的指令清完再重驗。");
+    banner("[canary-ddl] 未通過:四類 DDL 雖然全被拒,但靶場有殘留/複核不過。見上方殘留清單;清理後由自動化流程重新驗證。");
     return 1;
   }
-  banner("[canary-ddl] 未通過:有 DDL 非因權限被拒(INCONCLUSIVE)。修好 canary 佈置後重驗。");
+  banner("[canary-ddl] 未通過:有 DDL 非因權限被拒(INCONCLUSIVE)。canary 佈置修正後由自動化流程重新驗證。");
   return 1;
 }
 

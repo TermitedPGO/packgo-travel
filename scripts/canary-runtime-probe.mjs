@@ -34,7 +34,8 @@
  * 人工驗證不走這支腳本(2026-07-23 Jeff 裁定)。canary 的人工驗證一律走桌面指南
  *   步驟 9(標準 mysql 客戶端):
  *   ~/Desktop/PACKGO_AI交流/網站專案/DB加固_後台操作指南.md 步驟 9。
- *   不要手動貼含密碼的連線字串來跑這支腳本 —— 這正是多輪對抗審查要根治的外洩來源。
+ *   本腳本不供人手執行,連線字串由設定檔供給、輸出為機器狀態;人工輸入含密碼字串
+ *   正是多輪對抗審查要根治的外洩來源,故退出人工流程。
  *
  * 本腳本僅保留供【未來自動化】使用:屆時 CANARY_APP_RUNTIME_DATABASE_URL 由設定檔 /
  *   密鑰庫供給給自動化流程(非人手輸入),自動化流程再執行 `node scripts/canary-runtime-probe.mjs`。
@@ -320,7 +321,7 @@ export const PREFLIGHT_REASON = Object.freeze({
     "連線字串沒有指定 schema(結尾的 /canary 那一段漏了)。" + `結尾必須是 /${SCHEMA}。`,
   PROD_SCHEMA:
     "連線字串指向正式 schema 'test'。這兩支只准打隔離靶場 canary," +
-    "絕不准對正式站跑。請改用 canary 的連線字串。",
+    "絕不准對正式站跑;canary 的連線字串由設定檔供給。",
   SCHEMA_MISMATCH:
     `連線字串的 schema 不是 ${SCHEMA}。必須剛好是 '${SCHEMA}',` +
     "不接受近似名(canary_backup 之類),也不接受大小寫不同,更不接受留空。" +
@@ -538,8 +539,8 @@ export function installProcessGuards(tag, opts = {}) {
   const report = (kind, e) => {
     log(bar);
     log(`${tag} ${kind}:${errSummary(e)}`);
-    log(`${tag} 這一行只印錯誤碼與遮蔽後的訊息,設計上不含你的連線字串。`);
-    log(`${tag} 萬一你看到任何像是你密碼的東西,立刻停手告訴 Claude,不要貼出去。`);
+    log(`${tag} 此行僅輸出錯誤碼與遮蔽後訊息,經設計不含連線字串。`);
+    log(`${tag} 若日誌出現疑似憑證片段,視為已外洩(輸出經設計不含連線字串)。`);
     log(bar);
     exit(1);
   };
@@ -574,8 +575,8 @@ export function attachConnErrorGuard(conn, tag, opts = {}) {
     const bar = "=".repeat(72);
     log(bar);
     log(`${tag} 連線層錯誤(已遮蔽):${errSummary(e)}`);
-    log(`${tag} 這一行只印錯誤碼與遮蔽後的訊息,設計上不含你的連線字串。`);
-    log(`${tag} 萬一你看到任何像是你密碼的東西,立刻停手告訴 Claude,不要貼出去。`);
+    log(`${tag} 此行僅輸出錯誤碼與遮蔽後訊息,經設計不含連線字串。`);
+    log(`${tag} 若日誌出現疑似憑證片段,視為已外洩(輸出經設計不含連線字串)。`);
     log(bar);
     exit(1);
   });
@@ -630,7 +631,7 @@ export function classifyKillOutcome(err) {
   }
   return {
     status: "INCONCLUSIVE",
-    note: "資料庫回了預期外的錯碼,無法判定。把整個畫面貼給 Claude。",
+    note: "資料庫回了預期外的錯碼,無法判定;此為機器狀態,交由自動化流程處置。",
   };
 }
 
@@ -730,7 +731,7 @@ export function renderReport(results, meta = {}) {
     }
     out.push(ledger);
     out.push(
-      "下一步:把這整個畫面貼給 Claude。不要自己加權限,更不要給全部權限。",
+      "後續:結果為機器狀態,交由自動化流程處置;權限維持窄鑰匙,不得擴張或授予全部權限。",
     );
   }
   out.push(bar);
@@ -827,7 +828,7 @@ export async function runProbe(deps) {
       `憑證驗證失敗:${tlsInfo.authorizationError ? safeIdent(String(tlsInfo.authorizationError)) : "(未提供原因)"}`,
     );
     throw new ProbeAbort(
-      "中止:伺服器憑證驗不過。不要改成不驗憑證,把這個畫面貼給 Claude。" +
+      "中止:伺服器憑證驗不過。憑證驗證為硬性要求,不得停用;此為機器狀態,交由自動化流程處置。" +
         `代碼 ${ABORT.TLS_UNVERIFIED}。`,
       ABORT.TLS_UNVERIFIED,
     );
@@ -863,7 +864,7 @@ export async function runProbe(deps) {
   if (/^test$/i.test(dbName)) {
     add("02", "連線身分與靶場對不對", "FAIL", `DATABASE()=${dbShown}`);
     throw new ProbeAbort(
-      "中止:你把正式 schema(test)貼進來了。這支會寫資料,絕不准對正式站跑。" +
+      "中止:偵測到正式 schema(test)。這支會寫資料,絕不准對正式站跑。" +
         `代碼 ${ABORT.PROD_SCHEMA}。`,
       ABORT.PROD_SCHEMA,
     );
@@ -1198,8 +1199,8 @@ export async function runProbe(deps) {
         (cleanupErr ? `,清理時出錯:${errSummary(cleanupErr)}` : ""),
       balanced
         ? undefined
-        : "有殘留。把下面這句整段複製,貼進 TiDB 的 SQL 編輯器執行:\n" +
-          `        DELETE FROM \`canary\`.\`${TARGET}\` WHERE id IN (${createdIds.join(", ") || `${A}, ${B}`});`,
+        : "殘留未清。殘留清單(表名 + 建議修復 SQL,作為資料欄位):\n" +
+          `        表 \`canary\`.\`${TARGET}\`;建議 SQL:DELETE FROM \`canary\`.\`${TARGET}\` WHERE id IN (${createdIds.join(", ") || `${A}, ${B}`});`,
     );
   }
 

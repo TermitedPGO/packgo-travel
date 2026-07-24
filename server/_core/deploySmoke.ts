@@ -188,8 +188,9 @@ export async function runDeploySmoke(
       // 存不存在」:表被 DROP / rename 掉(整張表不見了)→ assertSchemaContract 回
       // ok:false,這裡 throw 讓臂標紅並列出缺表。表被 TRUNCATE / DELETE 清空但沒被刪
       // (COUNT=0、表還在)偵測不到、仍會 green。純讀 information_schema,零寫入。
-      // 與 activeToursCount 互補:那臂看「對客團數」,這臂看「災難級表還在不在」
-      // (表在但空 → 這臂綠、那臂紅)。見 ./schemaContract.ts。
+      // 與 activeToursCount 互補,但兩臂都有盲區:這臂只偵測必要表存不存在(表在即綠,
+      // 不看內容);activeToursCount 只覆蓋 tours 對客 active 團數為零,不覆蓋任意表被清空
+      // (例:只清空 supplierProductDetails 而 active tours>0 時,兩臂都綠)。見 ./schemaContract.ts。
       const drizzleDb = await db.getDb();
       if (!drizzleDb) throw new Error("database not available");
       const res = await assertSchemaContract(drizzleDb);

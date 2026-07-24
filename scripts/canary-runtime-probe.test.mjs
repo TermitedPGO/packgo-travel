@@ -278,7 +278,7 @@ test("report uses only the three ASCII markers, no emoji, no em dash", () => {
     !/[\u{1F300}-\u{1FAFF}\u{2700}-\u{27BF}\u{2600}-\u{26FF}]/u.test(out),
     "report must contain no emoji",
   );
-  assert.match(out, /不要自己加權限/);
+  assert.match(out, /不得擴張或授予全部權限/);
 });
 
 // ---------------------------------------------------------------------------
@@ -361,7 +361,7 @@ test("aborts when the certificate does not verify, and never suggests disabling 
     (e) => {
       assert.ok(e instanceof ProbeAbort);
       assert.ok(!/rejectUnauthorized/i.test(e.message));
-      assert.match(e.message, /不要改成不驗憑證/);
+      assert.match(e.message, /憑證驗證為硬性要求,不得停用/);
       return true;
     },
   );

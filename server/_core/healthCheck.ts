@@ -322,8 +322,10 @@ async function checkLlm(): Promise<SubCheckResult> {
  * Schema-contract sub-check — asserts every table in REQUIRED_TABLES exists in
  * the app schema (information_schema read; no writes). It only detects a table
  * that is GONE (DROP / rename away); a table that still exists but was emptied
- * (TRUNCATE / DELETE, COUNT=0) PASSES here — that "zero rows" signal is covered
- * by deploySmoke's activeToursCount arm, not this check. A missing required
+ * (TRUNCATE / DELETE, COUNT=0) PASSES here. deploySmoke's activeToursCount arm
+ * only covers the tours-facing active count reaching zero, not an arbitrary
+ * table being emptied — so an emptied non-tours table (e.g. supplierProductDetails
+ * with active tours > 0) is caught by neither arm. A missing required
  * table degrades the overall verdict so UptimeRobot alerts instead of the
  * storefront silently going to zero for weeks (2026-06-17 tours-wipe pattern,
  * where the tables were dropped, not merely emptied). Times out at 3s.
