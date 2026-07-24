@@ -21,15 +21,25 @@ DB 硬化批要把網站的長駐連線從 root 換成窄鑰匙帳號 `app_runti
    兩支腳本都要求 schema 名【完全等於 `canary`】:
    - 近似名(`canary_backup`、`canary2`…)一律中止。
    - 正式 schema 名 `test` 另外硬擋。
-   - 9b 在【連線之前】就先用連線字串裡的 schema 名擋一次,不符就中止,密碼不會送出去;
-     連上之後再用伺服器回報的 `DATABASE()` 複核一次。
+   - **兩支都在【連線之前】**就先用連線字串裡的 schema 名擋一次,不符就中止,
+     密碼不會送出去;連上之後再用伺服器回報的 `DATABASE()` 複核一次。
+     這道連線前防呆是同一個共用函式 `preflight()`(實作在 9a,9b `import` 過去),
+     不是兩份各自抄的程式碼,所以不會有「只修到一邊」的情況。
+     9a 是【會寫資料】的那一支,這道防線對它更要緊。
 2. **連線身分必須是 `app_runtime`**。`CURRENT_USER()` 不含 `app_runtime` 就中止。
-3. **TLS 必須驗得過**。簽發鏈與主機名兩者都驗。連線字串裡想關掉憑證驗證
-   (出現 `rejectUnauthorized=false`)會被直接擋下,沒有討價還價空間。
+3. **TLS 必須驗得過**。簽發鏈與主機名兩者都驗。
+   真正的保護是:**兩支腳本把 TLS 選項寫死在程式裡**
+   (`rejectUnauthorized: true` + `verifyIdentity: true` + `minVersion: TLSv1.2`),
+   **完全不讀連線字串裡的 `ssl` 參數**。所以就算連線字串裡塞了什麼,也改不動 TLS 行為。
+   另外 `preflight()` 看到字串裡出現 `rejectUnauthorized=false` 會中止,
+   但那只是**提醒**,不是安全邊界:那道字串比對可以用百分比編碼之類的寫法繞過去,
+   繞過去也沒有用,因為腳本根本不看那個參數。
 4. **連線字串與密碼絕不印出**。任何錯誤只印一行不含憑證的摘要
    (`code=… errno=… sqlState=… msg=…`),永遠不印原始 error 物件。
    這條是硬性的:Node 的 `ERR_INVALID_URL` 會把整條連線字串掛在 error 的 `input`
    屬性上,印物件等於把密碼印在畫面上,而這個畫面是要截圖貼給 AI 看的。
+   會繞過主流程的三條通道(`uncaughtException`、`unhandledRejection`、
+   連線物件自己的 `error` 事件)兩支都各自接住,一律只印遮蔽摘要後結束。
 5. **兩支都不碰正式站的 advisory lock 名**。9a 用 `canary:probe:tip:lock`,
    刻意不是正式的 `audit:tip:lock` —— 鎖的命名空間整個叢集共用,搶正式鎖 3 秒
    就等於為了驗證製造一筆事故。
@@ -160,6 +170,12 @@ tours 被清空的結構成因。腳本會:
 靶表有沒有多出欄位。腳本不自報清乾淨,一律用查詢證明。有殘留就逐項列出,
 並附上可以直接複製貼進 TiDB SQL 編輯器(用 migrator 身分)執行的清除語句。
 
+「乾淨」有兩個條件,缺一不可:**(1)** `information_schema` 查不到殘留,
+**(2)** 本次的副作用全都還原得回來。TRUNCATE 成功是典型的第二條不成立:
+表還在、欄位沒多,`information_schema` 查起來很乾淨,但內容已經被清空而且回不來。
+這種情況腳本會明講「結構查起來是完整的,但本次有還原不了的副作用,不算清乾淨」,
+**不會**印「副作用已清乾淨」。
+
 ### 預期輸出(靶場佈置正確、權限隔離已生效時)
 
 ```
@@ -211,11 +227,19 @@ node --test scripts/canary-ddl-rejection.test.mjs
 
 常見中止訊息:
 
-| 訊息 | 意思 | 怎麼辦 |
+中止訊息最後一行會附一個【代碼】(例如 `代碼:SCHEMA_MISMATCH`),照代碼查下表最快。
+
+| 訊息 / 代碼 | 意思 | 怎麼辦 |
 | --- | --- | --- |
-| 中止(未連線):schema 必須剛好是 'canary' | 連線字串指到別的 schema | 換成 canary 的連線字串 |
-| 中止(未連線):指向正式 schema 'test' | 貼成正式站的連線字串了 | 絕對不要對正式站跑,換掉 |
-| 中止:連線字串解析不了 | 密碼有特殊符號,或 port 超過 65535 | 密碼改純英數 32 位,port 用 4000 |
+| 代碼 `SCHEMA_MISMATCH`(schema 必須剛好是 'canary') | 連線字串指到別的 schema,或大小寫不同 | 換成 canary 的連線字串 |
+| 代碼 `PROD_SCHEMA`(指向正式 schema 'test') | 貼成正式站的連線字串了 | 絕對不要對正式站跑,換掉 |
+| 代碼 `NO_SCHEMA`(沒有指定 schema) | 連線字串結尾的 `/canary` 漏掉了 | 補上 `/canary` |
+| 代碼 `EMPTY_URL`(連線字串是空的) | env 沒設到,或設成了空字串 | 重設一次 env |
+| 代碼 `BAD_URL`(連線字串解析不了) | port 打錯(例如超過 65535),或整條字串貼漏了 | port 用 4000,整條重貼 |
+| 代碼 `BAD_ENCODING`(密碼裡有 %) | 密碼含 `%` 這類編碼字元 | 密碼改純英數 32 位 |
+| 代碼 `TLS_DISABLED`(把憑證驗證關掉了) | 連線字串裡有 rejectUnauthorized=false | 拿掉,不准不驗憑證 |
+| `msg=URI malformed` | 密碼(或帳號)裡有 `%` 之類的編碼字元,Node 解不開 | 回去把密碼改成純英數 32 位。正常情況下 `preflight()` 會先攔下來報 `BAD_ENCODING`,看到這行原始訊息代表是別的地方解碼失敗,把整個畫面貼給 Claude |
+| `code=CANARY_HANDSHAKE_TIMEOUT` | 對方接了 TCP、也吐了東西,但不是 MySQL 交握。通常是 port 打錯(例如打成 443 指到 HTTP 服務)。20 秒後由腳本自己中止 | port 改回 4000 |
+| `code=ETIMEDOUT msg=connect ETIMEDOUT` | 主機或 port 根本沒回應(15 秒,mysql2 自己的逾時) | 確認主機名與 port,確認網路通 |
 | 中止:連線身分不含 'app_runtime' | 用錯帳號(例如 root 或 migrator) | 換成 app_runtime 的連線字串 |
-| 中止:把憑證驗證關掉了 | 連線字串裡有 rejectUnauthorized=false | 拿掉,不准不驗憑證 |
 | 未通過:有 DDL 非因權限被拒 | 靶場沒佈好(多半靶表不存在) | 用 migrator 重建靶表再跑 |

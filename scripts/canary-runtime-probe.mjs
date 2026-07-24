@@ -10,8 +10,10 @@
  *
  * 安全鐵律(讀懂再跑):
  *   1. 只准對隔離 canary schema 跑。這支【會寫資料】(INSERT/UPDATE/DELETE),
- *      所以 schema 名必須「完全等於 canary」,比 9b 的模糊比對更嚴,避免打到
- *      canary_backup 之類的近似名,更避免打到正式 test schema。
+ *      所以 schema 名必須「完全等於 canary」,避免打到 canary_backup 之類的近似名,
+ *      更避免打到正式 test schema。這道檢查發生在【連線之前】(preflight(),9a/9b
+ *      共用同一份實作),貼錯字串時密碼連送都不會送出去;連上之後再用伺服器回報的
+ *      DATABASE() 複核一次。
  *   2. TLS 必須真的加密且憑證驗得過(簽發鏈 + 主機名兩者)。驗不過就停,
  *      絕不退回 rejectUnauthorized:false。這條連線會送出 app_runtime 的密碼。
  *   3. 寫入只用保留區間的 id(1.9e9 起跳),且每一筆都登記進 createdIds,
@@ -42,6 +44,23 @@ import { fileURLToPath } from "node:url";
 export const TARGET = "canary_probe_target";
 
 /**
+ * 唯一允許的 schema 名。9a 與 9b 共用同一個常量,完全比對,不做「含有」比對。
+ */
+export const SCHEMA = "canary";
+
+/**
+ * createConnection 的自家逾時。
+ *
+ * mysql2 3.16.1 的 connectTimeout 是在 socket 收到【第一個 data 事件】那一刻就被
+ * clearTimeout 掉的(lib/base/connection.js:95-100),不是等 handshake 完成。
+ * 所以對方只要吐出任何一個位元組再沉默(port 打成 443 指到 HTTP/TLS 服務就是
+ * 這樣:它會先回一段 HTTP 或 TLS alert),connectTimeout 就永遠不會觸發,
+ * 連線 promise 無限掛著。實測過:沒有這層 race 會卡到被外部砍掉為止。
+ * (完全不回位元組的沉默 port 反而是 connectTimeout 管得到的,15 秒會 ETIMEDOUT。)
+ */
+export const HANDSHAKE_TIMEOUT_MS = 20_000;
+
+/**
  * canary 專屬 advisory lock 名。刻意【不是】正式的 audit:tip:lock(安全鐵律 4)。
  * 正式鎖名逐字出現在 server/_core/auditLog.ts,本檔絕不碰它。
  */
@@ -67,12 +86,35 @@ const DISCONNECT_CODES = new Set([
 // 純函式(可單測,不連任何 DB)
 // ---------------------------------------------------------------------------
 
-/** 把 scheme://user:password@host 這種憑證從任何字串裡遮掉。 */
-export const redact = (s) =>
-  String(s ?? "").replace(
-    /([a-z][a-z0-9+.-]*:\/\/)[^\s/@]*:[^\s/@]*@/gi,
-    "$1***:***@",
-  );
+/**
+ * 遮掉 `scheme://user:password@host` 這種 URL 裡的憑證。
+ *
+ * 誠實的宣稱範圍(不是「任何字串都保證遮得掉」):
+ *   1. 整個字串【就是】一條 URL 時 —— 交給 Node 的 URL 解析器,帳號密碼一律換成
+ *      ***。密碼含 @ / 空白 / 斜線 / tab 這些會打死正規式的字元,走的是這條路,
+ *      因為 URL 解析器認的是「最後一個 @」而不是「第一個 @」。
+ *   2. 憑證只是【夾在錯誤訊息中間】時 —— 退回正規式。正規式刻意貪婪地吃到同一行
+ *      的最後一個 @,寧可多遮(例如把後面的 email 一起遮掉)也不漏。
+ * 兩條都不成立時(例如密碼被拆進兩個變數再拼進訊息裡),這個函式遮不到。
+ * 真正的保命符是 errSummary():它只取白名單欄位,不碰原始 error 物件。
+ */
+export const redact = (s) => {
+  const str = String(s ?? "");
+  const trimmed = str.trim();
+  if (trimmed) {
+    try {
+      const u = new URL(trimmed);
+      if (u.username || u.password) {
+        u.username = "***";
+        u.password = "***";
+        return u.toString();
+      }
+    } catch {
+      /* 不是單獨一條 URL,往下走正規式 */
+    }
+  }
+  return str.replace(/([a-z][a-z0-9+.-]*:\/\/)[^\r\n]*@/gi, "$1***:***@");
+};
 
 /**
  * 日誌安全的錯誤摘要。絕不印原始 error 物件:Node 與 mysql2 會把完整連線字串
@@ -88,6 +130,236 @@ export const errSummary = (e) => {
   if (msg) parts.push(`msg=${msg}`);
   return parts.length ? parts.join(" ") : "(no code/message)";
 };
+
+// ---------------------------------------------------------------------------
+// 連線前防呆(9a / 9b 共用同一份實作 —— 抄兩份就會有一天只修到一邊)
+// ---------------------------------------------------------------------------
+
+/**
+ * 連線前防呆的拒絕代碼。測試斷言代碼,不斷言中文句子,句子改寫不會弄壞測試。
+ */
+export const PREFLIGHT = {
+  OK: "OK",
+  EMPTY_URL: "EMPTY_URL",
+  TLS_DISABLED: "TLS_DISABLED",
+  BAD_URL: "BAD_URL",
+  BAD_ENCODING: "BAD_ENCODING",
+  NO_SCHEMA: "NO_SCHEMA",
+  PROD_SCHEMA: "PROD_SCHEMA",
+  SCHEMA_MISMATCH: "SCHEMA_MISMATCH",
+};
+
+/**
+ * 【連線之前】就把貼錯的連線字串擋掉。兩支腳本都必須在印出「連線中」之前呼叫,
+ * 這樣貼錯字串時密碼連送都不會送出去 —— 尤其 9a 是會寫資料的那一支。
+ *
+ * 純函式:不連線、不讀 env、不印任何東西,回傳判定讓呼叫端自己印。
+ *
+ * @param {unknown} rawUrl 連線字串(通常是 CANARY_APP_RUNTIME_DATABASE_URL)
+ * @returns {{ok:true, code:"OK", u:URL, host:string, schema:string}
+ *          |{ok:false, code:string, reason:string}}
+ */
+export function preflight(rawUrl) {
+  const raw = typeof rawUrl === "string" ? rawUrl : "";
+  if (!raw.trim()) {
+    return {
+      ok: false,
+      code: PREFLIGHT.EMPTY_URL,
+      reason: "連線字串是空的(env 沒設到,或設成了空字串)。回手冊重設一次 env。",
+    };
+  }
+
+  // 有人想從連線字串把憑證驗證關掉:擋下來並提醒。真正的保護不是這道字串檢查,
+  // 是下面 connOptions() 把 TLS 選項寫死、完全不讀連線字串裡的 ssl 參數。
+  if (/rejectUnauthorized"?\s*[:=]\s*(?:false|0)/i.test(raw)) {
+    return {
+      ok: false,
+      code: PREFLIGHT.TLS_DISABLED,
+      reason:
+        "連線字串裡想把憑證驗證關掉(rejectUnauthorized=false)。這條連線會送出密碼,不准不驗。" +
+        "把那一段拿掉再跑。",
+    };
+  }
+
+  let u;
+  try {
+    u = new URL(raw.trim());
+  } catch {
+    // catch 刻意【不接參數】:ERR_INVALID_URL 會把完整連線字串(含密碼)掛在
+    // error 的 `input` own enumerable 屬性上。
+    return {
+      ok: false,
+      code: PREFLIGHT.BAD_URL,
+      // 這句刻意不放連線字串範本:輸出裡永遠不該出現 scheme://帳號:密碼@ 這種形狀,
+      // 不然「畫面上看到 mysql:// 就是漏洞」這條判準會被自己的提示文字弄髒。
+      reason:
+        "連線字串解析不了。多半是 port 打錯(例如超過 65535),或整條字串貼漏了一段。" +
+        "確認 port 是 4000,格式回手冊第四段對一次,再重設一次 env。",
+    };
+  }
+
+  // 密碼裡有裸的 % (例如 pa%ss):new URL 收得下,但 connOptions 的
+  // decodeURIComponent 會丟 URIError「URI malformed」。在這裡先試一次,
+  // 給出看得懂的診斷,而不是讓 Jeff 對著 msg=URI malformed 猜。
+  for (const [what, value] of [
+    ["帳號", u.username],
+    ["密碼", u.password],
+    ["schema 名", u.pathname],
+  ]) {
+    try {
+      decodeURIComponent(value);
+    } catch {
+      return {
+        ok: false,
+        code: PREFLIGHT.BAD_ENCODING,
+        reason:
+          `${what}裡有 % 這個編碼字元(Node 會回 URI malformed)。` +
+          "回手冊把密碼改成純英數 32 位,不要有 % 也不要有其它符號,再重設一次 env。",
+      };
+    }
+  }
+
+  const dbFromUrl = decodeURIComponent(u.pathname.replace(/^\//, ""));
+  // 印回去的 schema 名一律先遮再截短:它來自使用者貼的字串,不能無條件信任。
+  const shown = redact(dbFromUrl).slice(0, 60);
+  if (!dbFromUrl) {
+    return {
+      ok: false,
+      code: PREFLIGHT.NO_SCHEMA,
+      reason:
+        "連線字串沒有指定 schema(結尾的 /canary 那一段漏了)。" +
+        `結尾必須是 /${SCHEMA}。`,
+    };
+  }
+  if (/^test$/i.test(dbFromUrl)) {
+    return {
+      ok: false,
+      code: PREFLIGHT.PROD_SCHEMA,
+      reason:
+        "連線字串指向正式 schema 'test'。這兩支只准打隔離靶場 canary," +
+        "絕不准對正式站跑。請改用 canary 的連線字串。",
+    };
+  }
+  if (dbFromUrl !== SCHEMA) {
+    return {
+      ok: false,
+      code: PREFLIGHT.SCHEMA_MISMATCH,
+      reason:
+        `連線字串的 schema 必須剛好是 '${SCHEMA}',目前是 '${shown}'。` +
+        "不接受近似名(canary_backup 之類),也不接受大小寫不同,更不接受留空。",
+    };
+  }
+  return { ok: true, code: PREFLIGHT.OK, u, host: u.hostname, schema: dbFromUrl };
+}
+
+// ---------------------------------------------------------------------------
+// 連線逾時與 process 級外洩防線(9a / 9b 共用)
+// ---------------------------------------------------------------------------
+
+/**
+ * 自己做的逾時。mysql2 的 connectTimeout 在 socket 收到第一個位元組那刻就被清掉,
+ * 對方吐一個位元組再沉默(port 打成 443 指到 HTTP 服務就是這樣)會無限卡死。
+ *
+ * 逾時之後才回來的連線會被 destroy 掉,不然行程會抓著一條活連線不肯結束;
+ * 逾時之後才回來的錯誤會被吞掉,不然它會變成沒人接的 rejection。
+ */
+export async function raceWithTimeout(factory, ms, label) {
+  const pending = Promise.resolve().then(factory);
+  let timer = null;
+  let timedOut = false;
+  try {
+    return await Promise.race([
+      pending,
+      new Promise((_, reject) => {
+        timer = setTimeout(() => {
+          timedOut = true;
+          const e = new Error(label);
+          e.code = "CANARY_HANDSHAKE_TIMEOUT";
+          reject(e);
+        }, ms);
+      }),
+    ]);
+  } finally {
+    if (timer !== null) clearTimeout(timer);
+    if (timedOut) {
+      pending.then(
+        (c) => {
+          try {
+            c?.destroy?.();
+          } catch {
+            /* noop */
+          }
+        },
+        () => {
+          /* 逾時之後才回來的錯誤已經沒人要了,吞掉,不讓它變成 unhandledRejection */
+        },
+      );
+    }
+  }
+}
+
+/**
+ * process 級的最後防線。
+ *
+ * main().catch() 只攔得到主 promise 鏈。uncaughtException(例如 timer callback
+ * 裡丟出來的錯)與 unhandledRejection(沒人接的 promise)這兩條會繞過它,
+ * 一繞過去,Node 預設處理器就會 util.inspect 整個 error 物件,把掛在上面的
+ * own enumerable 屬性(ERR_INVALID_URL 的 `input`、mysql2 的連線資訊)整串印出來,
+ * 密碼就在裡面。這裡把兩條都接住,只印遮蔽摘要然後 exit 1。
+ *
+ * @param {string} tag 印在行首的腳本標籤,例如 "[canary-probe]"
+ */
+export function installProcessGuards(tag, opts = {}) {
+  const {
+    proc = process,
+    log = console.error,
+    exit = (code) => process.exit(code),
+  } = opts;
+  const bar = "=".repeat(72);
+  const report = (kind, e) => {
+    log(bar);
+    log(`${tag} ${kind}:${errSummary(e)}`);
+    log(`${tag} 上面這行已經把連線字串與密碼遮掉了,可以直接截圖貼出去。`);
+    log(bar);
+    exit(1);
+  };
+  proc.on("uncaughtException", (e) => report("未捕捉的例外(已遮蔽)", e));
+  proc.on("unhandledRejection", (e) => report("沒人接的 rejection(已遮蔽)", e));
+  return report;
+}
+
+/**
+ * 連線物件的 error 事件是第三條繞過通道:EventEmitter 沒掛 'error' 監聽時,
+ * emit('error', err) 會把那個 err 直接丟出去,含密碼的屬性照樣被印。
+ *
+ * @param {object} conn mysql2 連線(PromiseConnection 會把 error 事件轉發上來)
+ * @param {string} tag  印在行首的腳本標籤
+ * @param {{tolerateDisconnect?:boolean}} opts
+ *   tolerateDisconnect:9a 的第 12 / 14 項會故意把自己的連線切斷,那是預期結果,
+ *   不能因此中止流程(不然成績單印不出來)。9b 不切自己的連線,一律當錯誤。
+ */
+export function attachConnErrorGuard(conn, tag, opts = {}) {
+  const {
+    log = console.error,
+    exit = (code) => process.exit(code),
+    tolerateDisconnect = false,
+  } = opts;
+  if (!conn || typeof conn.on !== "function") return false;
+  conn.on("error", (e) => {
+    const code = e && e.code ? String(e.code) : "";
+    if (tolerateDisconnect && DISCONNECT_CODES.has(code)) {
+      log(`${tag} 連線被切斷(這一支預期得到,不是錯誤):${errSummary(e)}`);
+      return;
+    }
+    const bar = "=".repeat(72);
+    log(bar);
+    log(`${tag} 連線層錯誤(已遮蔽):${errSummary(e)}`);
+    log(`${tag} 上面這行已經把連線字串與密碼遮掉了,可以直接截圖貼出去。`);
+    log(bar);
+    exit(1);
+  });
+  return true;
+}
 
 /**
  * GET_LOCK 的回傳三分法。
@@ -323,10 +595,10 @@ export async function runProbe(deps) {
       "中止:你把正式 schema(test)貼進來了。這支會寫資料,絕不准對正式站跑。",
     );
   }
-  if (dbName !== "canary") {
+  if (dbName !== SCHEMA) {
     add("02", "連線身分與靶場對不對", "FAIL", `DATABASE()=${dbName}`);
     throw new ProbeAbort(
-      `中止:schema 名必須剛好是 'canary'(目前是 ${dbName})。這支會寫資料,不接受近似名。`,
+      `中止:schema 名必須剛好是 '${SCHEMA}'(目前是 ${dbName})。這支會寫資料,不接受近似名。`,
     );
   }
   add(
@@ -759,34 +1031,33 @@ async function main() {
     process.exit(2);
   }
 
-  // 有人想從連線字串把憑證驗證關掉:直接擋,不給討價還價的空間。
-  if (/rejectUnauthorized"?\s*[:=]\s*false/i.test(url)) {
+  // 連線前防呆(跟 9b 共用同一份 preflight)。這支【會寫資料】,所以更不能等連上
+  // 才檢查:連線字串貼錯時,密碼在這裡就被擋住,連送都不會送出去。
+  const pre = preflight(url);
+  if (!pre.ok) {
     banner(
-      "[canary-probe] 中止:連線字串裡把憑證驗證關掉了。這條連線會送出密碼,不准不驗。",
+      `[canary-probe] 中止(還沒連線,密碼沒有送出去):${pre.reason}\n` +
+        `  代碼:${pre.code}`,
     );
     process.exit(1);
   }
-
-  let u;
-  try {
-    u = new URL(url);
-  } catch {
-    banner(
-      "[canary-probe] 中止:連線字串解析不了。\n" +
-        "  這不是權限問題也不是主機打錯,是你的密碼裡有特殊符號。\n" +
-        "  回手冊第四段,把密碼改成純英數 32 位,再重設一次 env。",
-    );
-    process.exit(1);
-  }
+  const u = pre.u;
 
   console.log(`[canary-probe] 連線中:${u.hostname}`);
   let conn;
   try {
-    conn = await mysql.createConnection(connOptions(u));
+    conn = await raceWithTimeout(
+      () => mysql.createConnection(connOptions(u)),
+      HANDSHAKE_TIMEOUT_MS,
+      `連了 ${HANDSHAKE_TIMEOUT_MS / 1000} 秒還沒完成 MySQL 交握(對方接了 TCP 卻不講 MySQL,多半是 port 打錯)`,
+    );
   } catch (e) {
     banner(`[canary-probe] 中止:連不上或憑證驗不過。${errSummary(e)}`);
     process.exit(1);
   }
+  // 第三條繞過通道:連線物件自己的 error 事件。
+  // 這支第 12 / 14 項會故意切斷自己的連線,所以斷線類 code 只記一行、不中止。
+  attachConnErrorGuard(conn, "[canary-probe]", { tolerateDisconnect: true });
 
   const tlsInfo = readTlsInfo(conn);
 
@@ -802,7 +1073,13 @@ async function main() {
 
   // KILL 用的拋棄式連線:同一組 TLS 設定,並重跑身分/靶場防呆。
   const killProbe = async () => {
-    const kc = await mysql.createConnection(connOptions(u));
+    const kc = await raceWithTimeout(
+      () => mysql.createConnection(connOptions(u)),
+      HANDSHAKE_TIMEOUT_MS,
+      `KILL 探測連線 ${HANDSHAKE_TIMEOUT_MS / 1000} 秒還沒完成 MySQL 交握`,
+    );
+    // 這條連線本來就要被自己 KILL 掉,斷線是預期結果。
+    attachConnErrorGuard(kc, "[canary-probe]", { tolerateDisconnect: true });
     try {
       const [rows] = await kc.query(
         "SELECT CURRENT_USER() AS cu, DATABASE() AS db",
@@ -810,7 +1087,7 @@ async function main() {
       const row = first(rows);
       const cu = String(pick(row, "cu") ?? "?");
       const dbn = String(pick(row, "db") ?? "?");
-      if (!/app_runtime/i.test(cu) || dbn !== "canary") {
+      if (!/app_runtime/i.test(cu) || dbn !== SCHEMA) {
         throw new ProbeAbort(
           `KILL 探測連線的身分/靶場不對(${cu} / ${dbn}),不執行。`,
         );
@@ -866,5 +1143,12 @@ const invokedDirectly =
   process.argv[1] &&
   path.resolve(process.argv[1]) === fileURLToPath(import.meta.url);
 if (invokedDirectly) {
-  main();
+  // 三條會繞過 main().catch() 的通道,兩條在這裡接住(第三條 conn 的 error 事件
+  // 在 main() 裡對每條連線各掛一次)。任何一條漏掉,Node 預設處理器就會把整個
+  // error 物件印出來 —— 密碼就掛在它的 own enumerable 屬性上。
+  installProcessGuards("[canary-probe]");
+  main().catch((e) => {
+    banner(`[canary-probe] 未預期錯誤:${errSummary(e)}`);
+    process.exit(1);
+  });
 }

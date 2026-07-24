@@ -11,6 +11,7 @@
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import {
   run,
   cleanupAndReport,
@@ -21,6 +22,21 @@ import {
   MANUAL,
 } from "./canary-ddl-rejection.mjs";
 import { TARGET } from "./canary-runtime-probe.mjs";
+
+/**
+ * 只留下【會執行的程式碼】的原始碼(整行註解一律丟掉)。
+ * 沒有這一步的話,把防線註解掉的突變會因為註解裡還留著那行字而測不出來。
+ */
+const codeOnly = (src) =>
+  src
+    .split("\n")
+    .filter((l) => !/^\s*(\/\/|\*|\/\*)/.test(l))
+    .join("\n");
+
+/** 9b 的原始碼(去掉整行註解)。守住「防呆是共用的、而且擋在連線之前」這件結構事實。 */
+const SRC_9B = codeOnly(
+  readFileSync(new URL("./canary-ddl-rejection.mjs", import.meta.url), "utf8"),
+);
 
 const probeOf = (kind) => PROBES.find((p) => p.kind === kind);
 
@@ -213,16 +229,55 @@ test("DROP 竟然成功 → 還原不了,老實說靶表不見了並附重建語
   assert.match(out, /副作用沒清乾淨/);
 });
 
-test("TRUNCATE 竟然成功 → 表還在但內容沒了,照實報告", async () => {
+test("TRUNCATE 竟然成功 → 結構完好但資料回不來,絕不准自報清乾淨", async () => {
   const conn = makeConn({ allow: ["TRUNCATE"] });
   const { value, out } = await capture(() => run(conn));
   assert.equal(value, 1);
   assertNoCredentials(out);
   assert.match(out, /P0!! TRUNCATE 竟然成功/);
   assert.match(out, /清理結果:❌ 清空沒辦法自動還原/);
-  // 結構沒被破壞,所以複核仍是乾淨的;但整體判定仍為 P0 未通過。
-  assert.match(out, /清理複核:靶場乾淨/);
+  // 誠實化(審查者1 第 1 點):TRUNCATE 之後 information_schema 查起來確實乾淨
+  // (表在、欄位沒多),但內容被清空且還原不回來。舊版只看 information_schema,
+  // 結果三行前才說「清空沒辦法自動還原」,結尾卻印「副作用已清乾淨」。
+  assert.ok(
+    !/清理複核:靶場乾淨/.test(out),
+    "資料被清空且還原不了,不准報「靶場乾淨」",
+  );
+  assert.ok(
+    !/副作用已清乾淨/.test(out),
+    "腳本自報清乾淨,但三行前才說還原不了 —— 這正是要修掉的自打臉",
+  );
+  assert.match(out, /但本次有還原不了的副作用,不算清乾淨/);
+  assert.match(out, /副作用沒清乾淨/);
   assert.match(out, /未通過\(P0\):TRUNCATE 竟然成功/);
+});
+
+test("cleanupAndReport:只要有 undo === null 的副作用,一律回 false", async () => {
+  for (const kind of ["TRUNCATE", "DROP"]) {
+    const probe = probeOf(kind);
+    assert.equal(probe.undo, null, kind + " 的 undo 應該是 null");
+    const conn = makeConn();
+    const { value } = await capture(() => cleanupAndReport(conn, [probe]));
+    assert.equal(value, false, kind + ":還原不了卻回報 clean=true");
+  }
+  // 對照組:還原得回來的副作用,清掉之後才准回 true。
+  const conn = makeConn();
+  conn.state.probeTable = true;
+  const { value } = await capture(() => cleanupAndReport(conn, [probeOf("CREATE")]));
+  assert.equal(value, true);
+});
+
+test("輸出裡不准同時出現「還原不了」與「已清乾淨」(自打臉偵測)", async () => {
+  for (const kind of ["CREATE", "ALTER", "TRUNCATE", "DROP"]) {
+    const conn = makeConn({ allow: [kind] });
+    const { out } = await capture(() => run(conn));
+    const saysIrreversible = /沒辦法自動還原|沒辦法用 app_runtime 還原/.test(out);
+    const saysClean = /副作用已清乾淨|清理複核:靶場乾淨/.test(out);
+    assert.ok(
+      !(saysIrreversible && saysClean),
+      kind + ":同一段輸出既說還原不了又說已清乾淨",
+    );
+  }
 });
 
 // ---------------------------------------------------------------------------
@@ -318,4 +373,37 @@ test("複核本身查不動時,回報 false 並只印遮蔽摘要", async () => 
   // errSummary 會把訊息裡的連線字串遮掉。
   assertNoCredentials(out);
   assert.match(out, /\*\*\*:\*\*\*@/);
+});
+
+// ---------------------------------------------------------------------------
+// 連線前防呆:必須是跟 9a 共用的那一份,而且擋在「連線中」之前
+// ---------------------------------------------------------------------------
+
+test("9b 的連線前防呆用的是 9a 的共用 preflight,沒有自己抄一份", () => {
+  assert.match(
+    SRC_9B,
+    /import\s*\{[^}]*\bpreflight\b[^}]*\}\s*from\s*"\.\/canary-runtime-probe\.mjs"/s,
+    "9b 必須從 9a import preflight",
+  );
+  assert.match(SRC_9B, /const pre = preflight\(url\);/, "9b 必須真的呼叫 preflight");
+  // 抄第二份的防呆遲早只修到一邊:9b 不准自己再定義一次 schema 常量或 test 硬擋。
+  assert.ok(
+    !/const SCHEMA\s*=/.test(SRC_9B),
+    "9b 不准自己再定義一份 SCHEMA,要從 9a import",
+  );
+});
+
+test("9b 的 preflight 擋在印出「連線中」之前", () => {
+  const preIdx = SRC_9B.indexOf("preflight(url)");
+  const connIdx = SRC_9B.indexOf("連線中:");
+  const createIdx = SRC_9B.indexOf("mysql.createConnection");
+  assert.ok(preIdx > 0, "找不到 preflight 呼叫");
+  assert.ok(connIdx > preIdx, "「連線中」印在 preflight 之前,密碼會先送出去");
+  assert.ok(createIdx > preIdx, "createConnection 排在 preflight 之前");
+});
+
+test("9b 檔尾裝了 process 級攔截與連線 error 監聽", () => {
+  assert.match(SRC_9B, /installProcessGuards\("\[canary-ddl\]"\)/);
+  assert.match(SRC_9B, /attachConnErrorGuard\(conn, "\[canary-ddl\]"\)/);
+  assert.match(SRC_9B, /raceWithTimeout\(/, "createConnection 必須包 handshake 逾時");
 });

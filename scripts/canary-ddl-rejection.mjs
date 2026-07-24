@@ -13,6 +13,7 @@
  *      env 指向 canary,且連線身分必須是 app_runtime(CRUD 無 DDL)。
  *      schema 名必須【完全等於 canary】(比照 9a),近似名如 canary_backup 一律中止;
  *      正式 schema 名 test 另外硬擋。不符者【在連線之前】就中止,密碼不會送出去。
+ *      這道連線前防呆是 preflight(),實作放在 9a、兩支共用同一份,不抄第二份。
  *   2. 任一 DDL 竟然【成功】= P0:立刻停測、印 P0 橫幅,不續試其餘 DDL
  *      (成功代表 app_runtime 還有 DDL 權限,權限隔離沒生效 — 這正是 2026-06-17 tours
  *      清空的結構成因)。停測之後只做一件事:把剛剛那個 DDL 造成的副作用收回來
@@ -47,7 +48,16 @@ import { fileURLToPath } from "node:url";
 // 日誌遮蔽(errSummary)與靶表名(TARGET)一律跟 9a 共用同一份實作,不另抄一份:
 // 抄一份就會有一天只修到一邊。errSummary() 已有單測(canary-runtime-probe.test.mjs)。
 // import 9a 不會讓它連線 —— 它只有被直接執行時才跑 main()。
-import { errSummary, TARGET } from "./canary-runtime-probe.mjs";
+import {
+  errSummary,
+  TARGET,
+  SCHEMA,
+  preflight,
+  raceWithTimeout,
+  installProcessGuards,
+  attachConnErrorGuard,
+  HANDSHAKE_TIMEOUT_MS,
+} from "./canary-runtime-probe.mjs";
 
 // privilege-denied 類錯誤碼(MySQL/TiDB):只有這些才算「因權限被拒」的合格拒絕。
 //   1142 ER_TABLEACCESS_DENIED_ERROR   表層級命令權限不足(CREATE/ALTER/DROP/...)
@@ -56,9 +66,7 @@ import { errSummary, TARGET } from "./canary-runtime-probe.mjs";
 //   1227 ER_SPECIFIC_ACCESS_DENIED_ERROR 需要特定權限
 const PRIVILEGE_DENIED_ERRNOS = new Set([1142, 1044, 1045, 1227]);
 
-/** 唯一允許的 schema 名。完全比對,不做「含有」比對(安全鐵律 1)。 */
-const SCHEMA = "canary";
-
+// 唯一允許的 schema 名(SCHEMA)從 9a import,兩支永遠是同一個常量。
 // 探測靶:ALTER/TRUNCATE/DROP 需要一張已存在的 canary 表(由 migrator 角色在佈置時建)。
 // 表名 TARGET 從 9a import,兩支永遠指同一張表。
 // CREATE 探測用的新表名(若竟被建出 = P0;app_runtime 本就不該建得出來)。
@@ -196,7 +204,16 @@ export async function findLeftovers(conn) {
 
 /**
  * 清理 + 交代結果(安全鐵律 5)。不管有沒有東西要清,這段一定會印。
- * @returns {Promise<boolean>} 靶場是否確認乾淨(複核通過才算)。
+ *
+ * 「乾淨」的定義有兩個條件,缺一不可:
+ *   1. 回頭查 information_schema 沒查到殘留(結構層面)。
+ *   2. 本次所有副作用都是【還原得回來】的(undo 不是 null)。
+ * 第 2 條是誠實化修正:TRUNCATE 成功時結構完好、information_schema 查起來很乾淨,
+ * 但靶表內容已經被清空而且還原不了。舊版只看第 1 條,結果三行前才說「清空沒辦法
+ * 自動還原」,結尾卻印「副作用已清乾淨」,自己打自己的臉。
+ * 原則:腳本永遠不准自報清乾淨。
+ *
+ * @returns {Promise<boolean>} 靶場是否確認乾淨(複核通過【且】沒有還原不了的副作用)。
  */
 export async function cleanupAndReport(conn, sideEffects) {
   console.log("");
@@ -233,17 +250,40 @@ export async function cleanupAndReport(conn, sideEffects) {
     return false;
   }
 
-  if (leftovers.length === 0) {
+  // 還原不了的副作用(undo === null)。結構查起來乾淨不代表資料還在。
+  const irreversible = sideEffects.filter((se) => !se.undo);
+
+  if (leftovers.length === 0 && irreversible.length === 0) {
     console.log(
       "[canary-ddl] 清理複核:靶場乾淨(沒有 " + CREATE_PROBE + "、靶表 " + TARGET +
         " 在、沒有多出 " + ADDED_COL + " 欄)。",
     );
     return true;
   }
+
+  if (leftovers.length === 0) {
+    console.log(
+      "[canary-ddl] 清理複核:⚠️  結構查起來是完整的(表在、沒有多出欄位)," +
+        "但本次有還原不了的副作用,不算清乾淨:",
+    );
+    for (const se of irreversible) {
+      console.log("            - " + se.effect);
+      console.log("              " + se.undoDesc + "。" + se.manual);
+    }
+    return false;
+  }
+
   console.log("[canary-ddl] 清理複核:⚠️  還有殘留,請手動清:");
   for (const l of leftovers) {
     console.log("            - " + l.what);
     console.log("              " + l.manual);
+  }
+  // 已經被 information_schema 查出來的殘留不再重複列一次(例如 DROP:靶表不見了
+  // 這件事上面那份清單已經講過)。只補列查不出來的,例如 TRUNCATE 清掉的內容。
+  for (const se of irreversible) {
+    if (leftovers.some((l) => l.manual === se.manual)) continue;
+    console.log("            - 另外這一項還原不了:" + se.effect);
+    console.log("              " + se.undoDesc + "。" + se.manual);
   }
   return false;
 }
@@ -365,56 +405,39 @@ async function main() {
     process.exit(2);
   }
 
-  // 有人想從連線字串把憑證驗證關掉:直接擋,不給討價還價的空間。
-  if (/rejectUnauthorized"?\s*[:=]\s*false/i.test(url)) {
-    banner("[canary-ddl] 中止:連線字串裡把憑證驗證關掉了。這條連線會送出密碼,不准不驗。");
-    process.exit(1);
-  }
-
-  // new URL() 必須自己包 try,而且 catch【不接參數】:ERR_INVALID_URL 把完整連線字串
-  // (含密碼)掛在 error 的 `input` own enumerable 屬性上,讓它走 Node 未捕捉例外路徑
-  // 會把密碼整串印在畫面上 —— 而 Jeff 會把這個畫面截圖貼給 AI。
-  let u;
-  try {
-    u = new URL(url);
-  } catch {
+  // 硬防呆第一道:還沒連線就先擋(安全鐵律 1 的「不符一律中止且不連線」)。
+  // 實作 preflight() 放在 9a,兩支共用同一份,不抄第二份。擋在這裡,密碼連送都不會
+  // 送出去。preflight 內部的 new URL() catch【不接參數】:ERR_INVALID_URL 把完整
+  // 連線字串(含密碼)掛在 error 的 `input` own enumerable 屬性上。
+  const pre = preflight(url);
+  if (!pre.ok) {
     banner(
-      "[canary-ddl] 中止:連線字串解析不了。\n" +
-        "  多半是密碼裡有特殊符號,或 port 打錯(例如超過 65535)。\n" +
-        "  回手冊把密碼改成純英數 32 位、確認 port 是 4000,再重設一次 env。",
+      "[canary-ddl] 中止(還沒連線,密碼沒有送出去):" + pre.reason + "\n" +
+        "  代碼:" + pre.code,
     );
     process.exit(1);
   }
-
-  // 硬防呆第一道:還沒連線就先用連線字串裡的 schema 名擋掉(安全鐵律 1 的
-  // 「不符一律中止且不連線」)。擋在這裡,密碼連送都不會送出去。
-  const dbFromUrl = decodeURIComponent(u.pathname.replace(/^\//, ""));
-  if (/^test$/i.test(dbFromUrl)) {
-    banner(
-      "[canary-ddl] 中止(未連線):連線字串指向正式 schema 'test'。\n" +
-        "  這支只准打隔離靶場 canary。請改用 canary 的連線字串。",
-    );
-    process.exit(1);
-  }
-  if (dbFromUrl !== SCHEMA) {
-    banner(
-      "[canary-ddl] 中止(未連線):連線字串的 schema 必須剛好是 '" + SCHEMA +
-        "',目前是 '" + dbFromUrl + "'。\n" +
-        "  不接受近似名(canary_backup 之類),也不接受留空。",
-    );
-    process.exit(1);
-  }
+  const u = pre.u;
 
   console.log("[canary-ddl] 連線中:" + u.hostname);
   // createConnection 也必須自己包 try:放在 try 外面時,連線層錯誤會走未捕捉例外
   // 路徑,把整個 error 物件連同它掛著的連線資訊一起印出來。
+  // 外面再包 raceWithTimeout:mysql2 的 connectTimeout 在 TCP 連上那刻就失效,
+  // 對方接了 TCP 卻不回合法 handshake(port 打成 443)會無限卡死。
   let conn;
   try {
-    conn = await mysql.createConnection(connOptions(u));
+    conn = await raceWithTimeout(
+      () => mysql.createConnection(connOptions(u)),
+      HANDSHAKE_TIMEOUT_MS,
+      "連了 " + HANDSHAKE_TIMEOUT_MS / 1000 +
+        " 秒還沒完成 MySQL 交握(對方接了 TCP 卻不講 MySQL,多半是 port 打錯)",
+    );
   } catch (e) {
     banner("[canary-ddl] 中止:連不上或憑證驗不過。" + errSummary(e));
     process.exit(1);
   }
+  // 第三條繞過通道:連線物件自己的 error 事件。這支不切自己的連線,一律當錯誤。
+  attachConnErrorGuard(conn, "[canary-ddl]");
 
   let exitCode = 1;
   try {
@@ -439,6 +462,11 @@ const invokedDirectly =
   process.argv[1] &&
   path.resolve(process.argv[1]) === fileURLToPath(import.meta.url);
 if (invokedDirectly) {
+  // 三條會繞過 main().catch() 的通道:uncaughtException、unhandledRejection、
+  // 連線物件的 error 事件。前兩條在這裡接住,第三條在 main() 裡對連線掛監聽。
+  // 任何一條漏掉,Node 預設處理器就會 util.inspect 整個 error 物件,
+  // 把掛在它 own enumerable 屬性上的連線字串(含密碼)整串印出來。
+  installProcessGuards("[canary-ddl]");
   // 最後一道網:main() 裡任何漏網的 throw 都只印遮蔽後的單行摘要,
   // 絕不讓 Node 的未捕捉例外處理器把原始 error 物件(可能含連線字串)印出來。
   main().catch((e) => {

@@ -11,6 +11,7 @@
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import {
   runProbe,
   classifyLockResult,
@@ -23,6 +24,12 @@ import {
   ProbeAbort,
   TARGET,
   LOCK_NAME,
+  SCHEMA,
+  PREFLIGHT,
+  preflight,
+  raceWithTimeout,
+  installProcessGuards,
+  attachConnErrorGuard,
 } from "./canary-runtime-probe.mjs";
 
 // ---------------------------------------------------------------------------
@@ -517,4 +524,340 @@ test("the report renders end to end from a real runProbe result", async () => {
   assert.match(out, /正向驗證/);
   assert.match(out, /第 11 項/);
   assert.match(out, /靶場:開始 0 列,結束 0 列/);
+});
+
+// ---------------------------------------------------------------------------
+// redact:密碼含 @ / 空白 / 斜線 / tab 這些會打死正規式的字元,一樣要遮掉
+// ---------------------------------------------------------------------------
+
+test("redact masks passwords containing @, spaces, slashes and tabs", () => {
+  const nasty = [
+    ["at 符號", "p@ss@word"],
+    ["空白", "p ss word"],
+    ["斜線", "p/ss/word"],
+    ["tab", "p\tss"],
+    ["混合", "p@ /s\tS3cret"],
+    ["冒號", "p:ss:word"],
+  ];
+  for (const [label, pw] of nasty) {
+    const s = `mysql://app_runtime:${pw}@gw.tidbcloud.com:4000/canary`;
+    const out = redact(s);
+    assert.ok(!out.includes(pw), `${label}:密碼整串沒被遮掉 → ${out}`);
+    assert.ok(!out.includes("S3cret"), `${label}:密碼片段沒被遮掉 → ${out}`);
+    assert.ok(!out.includes("app_runtime"), `${label}:帳號沒被遮掉 → ${out}`);
+    assert.ok(out.includes("gw.tidbcloud.com"), `${label}:主機名不該被吃掉`);
+    assert.ok(out.includes("***"), `${label}:沒有遮蔽標記`);
+  }
+});
+
+test("redact masks a credentialled URL embedded mid-message, even with an @ in the password", () => {
+  const msg = "connect ETIMEDOUT for mysql://app_runtime:p@ssZQX9SENTINEL@gw.example:4000/canary now";
+  const out = redact(msg);
+  assert.ok(!out.includes("ZQX9SENTINEL"), `password leaked: ${out}`);
+  assert.ok(out.includes("***:***@"), out);
+});
+
+test("redact leaves credential-free text alone", () => {
+  assert.equal(redact("plain message"), "plain message");
+  assert.equal(redact(""), "");
+  assert.equal(redact(null), "");
+  assert.equal(redact("https://example.com/docs"), "https://example.com/docs");
+});
+
+// ---------------------------------------------------------------------------
+// preflight:連線【之前】的防呆。這是 9a 最重要的一道 —— 這支會寫資料。
+// ---------------------------------------------------------------------------
+
+const URL_WITH = (schemaPart, pw = "ZQX9SENTINEL") =>
+  `mysql://prefix.app_runtime:${pw}@gw.example.com:4000${schemaPart}`;
+
+test("preflight accepts exactly one thing: schema === canary", () => {
+  const r = preflight(URL_WITH("/canary"));
+  assert.equal(r.ok, true);
+  assert.equal(r.code, PREFLIGHT.OK);
+  assert.equal(r.schema, "canary");
+  assert.equal(r.host, "gw.example.com");
+  assert.ok(r.u instanceof URL);
+});
+
+test("preflight rejects the near-miss schema canary_backup", () => {
+  const r = preflight(URL_WITH("/canary_backup"));
+  assert.equal(r.ok, false);
+  assert.equal(r.code, PREFLIGHT.SCHEMA_MISMATCH);
+  assert.match(r.reason, /剛好是 'canary'/);
+  assert.match(r.reason, /canary_backup/);
+});
+
+test("preflight rejects the production schema test, in any casing", () => {
+  for (const name of ["test", "TEST", "Test"]) {
+    const r = preflight(URL_WITH(`/${name}`));
+    assert.equal(r.ok, false, name);
+    assert.equal(r.code, PREFLIGHT.PROD_SCHEMA, name);
+    assert.match(r.reason, /正式 schema 'test'/);
+  }
+});
+
+test("preflight rejects Canary: schema comparison is case sensitive", () => {
+  const r = preflight(URL_WITH("/Canary"));
+  assert.equal(r.ok, false);
+  assert.equal(r.code, PREFLIGHT.SCHEMA_MISMATCH);
+  assert.match(r.reason, /大小寫不同/);
+});
+
+test("preflight rejects an empty or blank connection string", () => {
+  for (const raw of ["", "   ", undefined, null, 12345]) {
+    const r = preflight(raw);
+    assert.equal(r.ok, false, String(raw));
+    assert.equal(r.code, PREFLIGHT.EMPTY_URL, String(raw));
+    assert.match(r.reason, /連線字串是空的/);
+  }
+});
+
+test("preflight rejects a connection string with no schema path at all", () => {
+  for (const tail of ["", "/"]) {
+    const r = preflight(URL_WITH(tail));
+    assert.equal(r.ok, false, JSON.stringify(tail));
+    assert.equal(r.code, PREFLIGHT.NO_SCHEMA, JSON.stringify(tail));
+    assert.match(r.reason, /沒有指定 schema/);
+  }
+});
+
+test("preflight rejects an impossible port (99999) before any connection", () => {
+  const r = preflight("mysql://prefix.app_runtime:ZQX9SENTINEL@gw.example.com:99999/canary");
+  assert.equal(r.ok, false);
+  assert.equal(r.code, PREFLIGHT.BAD_URL);
+  assert.match(r.reason, /port/);
+});
+
+test("preflight diagnoses a bare % in the password instead of leaving URI malformed", () => {
+  const r = preflight("mysql://prefix.app_runtime:ZQX9%SENTINEL@gw.example.com:4000/canary");
+  assert.equal(r.ok, false);
+  assert.equal(r.code, PREFLIGHT.BAD_ENCODING);
+  assert.match(r.reason, /密碼裡有 % 這個編碼字元/);
+  assert.match(r.reason, /純英數 32 位/);
+});
+
+test("preflight rejects any attempt to switch certificate verification off", () => {
+  for (const raw of [
+    "mysql://prefix.app_runtime:ZQX9SENTINEL@gw.example.com:4000/canary?ssl={\"rejectUnauthorized\":false}",
+    "mysql://prefix.app_runtime:ZQX9SENTINEL@gw.example.com:4000/canary?rejectUnauthorized=false",
+    "mysql://prefix.app_runtime:ZQX9SENTINEL@gw.example.com:4000/canary?rejectUnauthorized=0",
+    "mysql://prefix.app_runtime:ZQX9SENTINEL@gw.example.com:4000/canary?REJECTUNAUTHORIZED=FALSE",
+  ]) {
+    const r = preflight(raw);
+    assert.equal(r.ok, false, raw);
+    assert.equal(r.code, PREFLIGHT.TLS_DISABLED, raw);
+    assert.match(r.reason, /不准不驗/);
+  }
+});
+
+test("preflight never echoes the password back in any rejection reason", () => {
+  const cases = [
+    "",
+    "mysql://prefix.app_runtime:ZQX9SENTINEL@gw.example.com:4000/canary_backup",
+    "mysql://prefix.app_runtime:ZQX9SENTINEL@gw.example.com:4000/test",
+    "mysql://prefix.app_runtime:ZQX9SENTINEL@gw.example.com:4000/Canary",
+    "mysql://prefix.app_runtime:ZQX9SENTINEL@gw.example.com:4000",
+    "mysql://prefix.app_runtime:ZQX9SENTINEL@gw.example.com:99999/canary",
+    "mysql://prefix.app_runtime:ZQX9%SENTINEL@gw.example.com:4000/canary",
+    "mysql://prefix.app_runtime:ZQX9SENTINEL@gw.example.com:4000/canary?rejectUnauthorized=false",
+    "mysql://prefix.app_runtime:ZQX9SENTINEL@gw.example.com:4000/mysql://u:p@evil/canary",
+  ];
+  for (const raw of cases) {
+    const r = preflight(raw);
+    assert.equal(r.ok, false, raw);
+    assert.ok(!r.reason.includes("ZQX9SENTINEL"), `密碼漏進拒絕訊息:${r.reason}`);
+    assert.ok(
+      !/([a-z][a-z0-9+.-]*:\/\/)(?!\*\*\*:\*\*\*@)[^\s/@]*:[^\s/@]*@/i.test(r.reason),
+      `拒絕訊息裡有未遮蔽的連線字串:${r.reason}`,
+    );
+  }
+});
+
+// ---------------------------------------------------------------------------
+// handshake 逾時
+// ---------------------------------------------------------------------------
+
+test("raceWithTimeout returns the value when the factory wins", async () => {
+  const v = await raceWithTimeout(async () => "connected", 1000, "too slow");
+  assert.equal(v, "connected");
+});
+
+test("raceWithTimeout rejects a connection that accepts TCP but never finishes the handshake", async () => {
+  const never = () => new Promise(() => {});
+  await assert.rejects(
+    () => raceWithTimeout(never, 30, "交握逾時"),
+    (e) => {
+      assert.equal(e.code, "CANARY_HANDSHAKE_TIMEOUT");
+      assert.match(e.message, /交握逾時/);
+      return true;
+    },
+  );
+});
+
+test("raceWithTimeout destroys a connection that arrives after the timeout", async () => {
+  let destroyed = false;
+  const late = () =>
+    new Promise((resolve) =>
+      setTimeout(() => resolve({ destroy: () => { destroyed = true; } }), 40),
+    );
+  await assert.rejects(() => raceWithTimeout(late, 10, "交握逾時"));
+  await new Promise((r) => setTimeout(r, 80));
+  assert.equal(destroyed, true, "逾時後才回來的連線沒有被丟掉,行程會掛著不結束");
+});
+
+test("raceWithTimeout swallows a rejection that arrives after the timeout", async () => {
+  const lateFail = () =>
+    new Promise((_, reject) => setTimeout(() => reject(new Error("late")), 30));
+  await assert.rejects(() => raceWithTimeout(lateFail, 10, "交握逾時"));
+  // 若沒吞掉,這裡會冒出 unhandledRejection 把整個 test runner 打掛。
+  await new Promise((r) => setTimeout(r, 60));
+});
+
+test("raceWithTimeout propagates a real connection error untouched", async () => {
+  const boom = Object.assign(new Error("ETIMEDOUT"), { code: "ETIMEDOUT" });
+  await assert.rejects(
+    () => raceWithTimeout(() => Promise.reject(boom), 1000, "交握逾時"),
+    (e) => e === boom,
+  );
+});
+
+// ---------------------------------------------------------------------------
+// process 級攔截與連線 error 監聽(三條繞過 main().catch() 的通道)
+// ---------------------------------------------------------------------------
+
+/** 只認 on / emit 的最小 process 替身。 */
+function fakeProc() {
+  const handlers = new Map();
+  return {
+    on(name, fn) {
+      handlers.set(name, fn);
+      return this;
+    },
+    fire(name, arg) {
+      const fn = handlers.get(name);
+      if (!fn) throw new Error(`no handler for ${name}`);
+      fn(arg);
+    },
+    has: (name) => handlers.has(name),
+  };
+}
+
+/** ERR_INVALID_URL 那種把整條連線字串掛在 own property 上的錯。 */
+const leakyError = () =>
+  Object.assign(new TypeError("Invalid URL"), {
+    code: "ERR_INVALID_URL",
+    input: "mysql://prefix.app_runtime:ZQX9SENTINEL@gw.example.com:4000/canary",
+  });
+
+test("installProcessGuards catches BOTH uncaughtException and unhandledRejection", () => {
+  const proc = fakeProc();
+  installProcessGuards("[canary-probe]", { proc, log: () => {}, exit: () => {} });
+  assert.ok(proc.has("uncaughtException"), "uncaughtException 沒被接住");
+  assert.ok(proc.has("unhandledRejection"), "unhandledRejection 沒被接住");
+});
+
+test("installProcessGuards prints only a redacted summary and exits 1", () => {
+  for (const channel of ["uncaughtException", "unhandledRejection"]) {
+    const proc = fakeProc();
+    const lines = [];
+    const exits = [];
+    installProcessGuards("[canary-probe]", {
+      proc,
+      log: (l) => lines.push(String(l)),
+      exit: (c) => exits.push(c),
+    });
+    proc.fire(channel, leakyError());
+    const out = lines.join("\n");
+    assert.ok(!out.includes("ZQX9SENTINEL"), `${channel} 把密碼印出來了:${out}`);
+    assert.ok(!out.includes("gw.example.com"), `${channel} 把主機連同字串印出來了`);
+    assert.match(out, /code=ERR_INVALID_URL/);
+    assert.deepEqual(exits, [1], `${channel} 沒有 fail-closed exit 1`);
+  }
+});
+
+/** 只認 on / emit 的最小連線替身。 */
+function fakeConn() {
+  const handlers = [];
+  return {
+    on(name, fn) {
+      if (name === "error") handlers.push(fn);
+      return this;
+    },
+    emitError(e) {
+      if (!handlers.length) throw e; // EventEmitter 沒人接 'error' 時的真實行為
+      for (const fn of handlers) fn(e);
+    },
+    get listenerCount() {
+      return handlers.length;
+    },
+  };
+}
+
+test("attachConnErrorGuard turns a connection error event into a redacted line", () => {
+  const conn = fakeConn();
+  const lines = [];
+  const exits = [];
+  assert.equal(
+    attachConnErrorGuard(conn, "[canary-ddl]", {
+      log: (l) => lines.push(String(l)),
+      exit: (c) => exits.push(c),
+    }),
+    true,
+  );
+  assert.equal(conn.listenerCount, 1, "沒有掛上 error 監聽,錯誤會被 Node 原樣印出");
+  conn.emitError(leakyError());
+  const out = lines.join("\n");
+  assert.ok(!out.includes("ZQX9SENTINEL"), `連線 error 事件把密碼印出來了:${out}`);
+  assert.match(out, /連線層錯誤/);
+  assert.deepEqual(exits, [1]);
+});
+
+test("attachConnErrorGuard tolerates the self-inflicted disconnect 9a expects", () => {
+  const conn = fakeConn();
+  const lines = [];
+  const exits = [];
+  attachConnErrorGuard(conn, "[canary-probe]", {
+    log: (l) => lines.push(String(l)),
+    exit: (c) => exits.push(c),
+    tolerateDisconnect: true,
+  });
+  conn.emitError(
+    Object.assign(new Error("Connection lost"), { code: "PROTOCOL_CONNECTION_LOST" }),
+  );
+  assert.deepEqual(exits, [], "預期內的自我斷線不該中止流程,成績單還沒印");
+  assert.match(lines.join("\n"), /預期得到/);
+  // 但不是斷線的錯誤,照樣 fail-closed。
+  conn.emitError(leakyError());
+  assert.deepEqual(exits, [1]);
+  assert.ok(!lines.join("\n").includes("ZQX9SENTINEL"));
+});
+
+test("attachConnErrorGuard is a no-op on something that is not an emitter", () => {
+  assert.equal(attachConnErrorGuard(null, "[x]"), false);
+  assert.equal(attachConnErrorGuard({}, "[x]"), false);
+});
+
+// ---------------------------------------------------------------------------
+// 9a 的結構事實:防呆擋在連線之前,三條通道都有人接
+// ---------------------------------------------------------------------------
+
+test("9a calls preflight before it prints 連線中 or opens a connection", () => {
+  // 整行註解一律丟掉:不然把防線註解掉的突變會因為註解裡還留著那行字而測不出來。
+  const src = readFileSync(
+    new URL("./canary-runtime-probe.mjs", import.meta.url),
+    "utf8",
+  )
+    .split("\n")
+    .filter((l) => !/^\s*(\/\/|\*|\/\*)/.test(l))
+    .join("\n");
+  const preIdx = src.indexOf("preflight(url)");
+  const connIdx = src.indexOf("連線中:");
+  const createIdx = src.indexOf("mysql.createConnection");
+  assert.ok(preIdx > 0, "9a 沒有呼叫 preflight");
+  assert.ok(connIdx > preIdx, "「連線中」印在 preflight 之前,密碼會先送出去");
+  assert.ok(createIdx > preIdx, "createConnection 排在 preflight 之前");
+  assert.match(src, /installProcessGuards\("\[canary-probe\]"\)/);
+  assert.match(src, /attachConnErrorGuard\(conn, "\[canary-probe\]"/);
+  assert.match(src, /raceWithTimeout\(/);
 });
