@@ -103,7 +103,12 @@ const ERROR_LOG_FILE = ".deploy-last-error.log";
 // B1.2(Codex 6.6 P0)外部審查閘:本 release 相關的 AI 交流審查若還有「待傳/待裁定/
 // 退回」未結,不得進 token 閘(6.7 §六流程教訓:未結審查就部署會把未裁定的東西上線)。
 // 讀桌面的 AI 交流索引;fail-closed(讀不到也擋),逃生口 SKIP_REVIEW_GATE=1。
-const REVIEW_INDEX_PATH = "/Users/jeff/Desktop/PACKGO_AI交流/00_索引.md";
+// 2026-07-25:交流資料夾搬到 02_工作專案/ 底下,舊路徑失效。舊值為
+// "/Users/jeff/Desktop/PACKGO_AI交流/00_索引.md",讀不到 → 本閘永久 fail-closed,
+// ship 只能靠 SKIP_REVIEW_GATE=1 繞過 = 閘失效(正是本檔下方註解預言過的失效模式)。
+// export 出去是為了讓測試能鎖住真實常數:先前測試一律注入假的 readReviewIndex,
+// 所以路徑寫錯永遠測不出來(docs/adr/0005 的第三種假綠)。
+export const REVIEW_INDEX_PATH = "/Users/jeff/Desktop/02_工作專案/PACKGO_AI交流/00_索引.md";
 // 命中任一即擋:★待傳(還沒交給 Jeff 傳)、待裁定(等 Jeff/外部裁決)、退回(被打回重做)。
 const REVIEW_BLOCK_MARKERS = ["★待傳", "待裁定", "退回"];
 

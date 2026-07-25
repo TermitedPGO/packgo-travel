@@ -27,7 +27,7 @@ import { tmpdir } from "node:os";
 import { execSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { dirname, join, relative, sep } from "node:path";
-import { runGuard } from "./safe-deploy.mjs";
+import { runGuard, REVIEW_INDEX_PATH } from "./safe-deploy.mjs";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 
@@ -1229,4 +1229,30 @@ test("R13-1 parser: 尾端 SP+HTAB continuation → 拒", () => {
   const fixture =
     "HTTP/2 200 \r\ncontent-type: application/vnd.oci.image.index.v1+json\r\ndocker-content-digest: " + D64A + "\r\n \t\r\n\r\n";
   assert.throws(() => parseRegistryDigestHeaders(fixture), /obs-fold/);
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 6.9 外部審查閘的路徑常數(2026-07-25)
+//
+// 為什麼需要這一條:本檔其餘測試都注入假的 readReviewIndex,所以「真實常數指到哪」
+// 從來沒有被鎖住。2026-07 交流資料夾從 ~/Desktop/PACKGO_AI交流/ 搬到
+// ~/Desktop/02_工作專案/PACKGO_AI交流/ 之後,常數變成指向不存在的路徑,而整套測試
+// 照樣全綠 —— 閘因此永久 fail-closed,ship 只能靠 SKIP_REVIEW_GATE=1 繞過,等於失效。
+//
+// 這是 docs/adr/0005 定義的第三種假綠:測試把要驗的東西整個換掉了。
+// 本條直接鎖真實常數,不經 deps 注入。
+// ─────────────────────────────────────────────────────────────────────────────
+
+test("6.9 審查閘:REVIEW_INDEX_PATH 必須指向真實存在的索引檔", () => {
+  assert.equal(
+    typeof REVIEW_INDEX_PATH,
+    "string",
+    "REVIEW_INDEX_PATH 必須被 export,否則測試無法鎖住它(這正是 2026-07 搬家失效沒被抓到的原因)",
+  );
+  assert.ok(
+    existsSync(REVIEW_INDEX_PATH),
+    `6.9 外部審查閘讀不到索引:${REVIEW_INDEX_PATH}\n` +
+      `    該閘為 fail-closed,路徑失效會讓 pnpm ship 永久被擋,或逼人把 SKIP_REVIEW_GATE=1 當常態。\n` +
+      `    若交流資料夾搬過家,更新 safe-deploy.mjs 的 REVIEW_INDEX_PATH,不要改測試。`,
+  );
 });
