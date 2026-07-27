@@ -1,5 +1,14 @@
 # AI Advisor — Pricing & UX Spec
 
+> **SUPERSEDED 2026-07-26** — Jeff 三次裁定(07-25「那就免費唄」、07-25
+> 「會員積分就可以了」、07-26「不應該有付費的會員機制」)後,付費層與
+> 訂閱機制已整組自程式移除(membership-free-tier 批,Codex 終驗中)。
+> 本文件涉及付費層的段落只作歷史紀錄,不再是現行規格。
+> 現行制度:免費單層會員,權益只有 Packpoint 積分;AI 顧問對所有人免費,
+> 只受防濫用限流(IP 每小時、IP 每日、全站匿名每日)。
+> 恢復付費層的前置法遵見會員方案_研究報告_2026-07-25.md(§17550.27、AB 2863)。
+
+
 **Status:** Draft v1, awaiting Jeff approval.
 **Owner:** Jeff Hsieh
 **Last updated:** 2026-05-01

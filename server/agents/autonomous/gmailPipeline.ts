@@ -1393,37 +1393,26 @@ async function processOneEmail(
     );
   }
 
-  // Round 81 / 2026-05-17 — Repurchase upgrade CTA append.
-  // Runs BEFORE auto-send decision so the augmented draft goes through the
-  // same safety regex check. If user is a returning free-tier customer who
-  // hasn't been pitched yet, append a P.S. with PACK&GO Plus 10-day trial.
+  // 2026-07-26 R2(P0-1,Jeff 裁定不應有付費會員機制):
+  // 原 Plus 試用推銷 CTA(repurchaseCta.maybeAppendUpgradeCta)整組移除,
+  // 對客草稿不再附加任何付費推銷。原函式裡的 CRM 詢問計數側效
+  // 保留,拆到 inquiryCounter.recordInquiry。非致命:計數失敗不擋回信。
+  // R3(P1-1)呼叫條件復原:原 CTA 年代即為 draftReply && senderEmail,
+  // R2 誤擴成只看 senderEmail,會讓不產草稿的信也計數,屬未授權行為擴張。
   if (decision.draftReply && senderEmail) {
     try {
-      const { maybeAppendUpgradeCta } = await import("../../_core/repurchaseCta");
-      const result_cta = await maybeAppendUpgradeCta({
-        draftReply: decision.draftReply,
-        senderEmail,
-        // 2026-07-01 語言 gate — en 客人以 code 層偵測為準,免得 LLM 自報的
-        // draftLanguage 標錯,讓通過語言 gate 的英文草稿又被貼上中文 CTA。
-        language: decision.expectedLanguage === "en" ? "en" : decision.draftLanguage,
-      });
-      if (result_cta.appended) {
-        decision.draftReply = result_cta.draftReply;
-        log.info(
-          { senderEmail },
-          "[gmailPipeline] Appended Plus upgrade CTA to draft",
-        );
-      }
+      const { recordInquiry } = await import("../../_core/inquiryCounter");
+      await recordInquiry({ senderEmail });
     } catch (err) {
-      log.warn({ err }, "[gmailPipeline] maybeAppendUpgradeCta failed (non-fatal)");
+      log.warn({ err }, "[gmailPipeline] recordInquiry failed (non-fatal)");
     }
   }
 
   // Codex 16:02 P1-3 — FINAL canonical chokepoint. The agent's attachment
-  // gate ran before the augmentation above (CTA carries Markdown ** and em
-  // dashes), so the string it approved is not necessarily the string that
+  // gate ran before this point(歷史上這裡曾有 CTA augmentation,2026-07-26
+  // 已移除), so the string it approved is not necessarily the string that
   // goes out. Canonicalize + re-gate HERE, after all autonomous
-  // augmentation; decision.draftReply from this point on IS the exact
+  // mutation; decision.draftReply from this point on IS the exact
   // bodyText handed to sendReplyInThread below — same bytes, no later
   // mutation. Runs before evaluateAutoSend so forceEscalate kills real
   // sends through the normal "escalated" verdict. Jeff-manual edits keep

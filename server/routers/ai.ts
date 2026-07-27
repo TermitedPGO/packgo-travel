@@ -78,44 +78,17 @@ async function assertOwnsUsageLogs(
 export const aiRouter = router({
     // Round 80.19: query current quota status without consuming a message.
     // Used by dialog open to show the counter pill + paywall preview.
-    getQuota: publicProcedure.query(async ({ ctx }) => {
-      const userTier = (ctx.user as any)?.tier || "free";
-      const isPaidTier = userTier === "plus" || userTier === "concierge";
-      if (isPaidTier) {
-        return { tier: userTier as "plus" | "concierge", used: 0, cap: -1, windowDays: 30 };
-      }
-      const FREE_TIER_LIMIT = 5;
-      const FREE_TIER_WINDOW_DAYS = 30;
-      const ip = ctx.ip;
-      const { createHash } = await import("crypto");
-      const ipHashKey = ip ? createHash("sha256").update(ip).digest("hex").slice(0, 64) : null;
-      const userIdKey = ctx.user?.id ?? null;
-      const { aiAdvisorUsage } = await import("../../drizzle/schema");
-      const { sql, and, gt, eq } = await import("drizzle-orm");
-      const { getDb } = await import("../db");
-      const db = await getDb();
-      let usage = 0;
-      if (db) {
-        const since = new Date(Date.now() - FREE_TIER_WINDOW_DAYS * 24 * 60 * 60 * 1000);
-        const conditions = userIdKey
-          ? and(eq(aiAdvisorUsage.userId, userIdKey), gt(aiAdvisorUsage.createdAt, since))
-          : ipHashKey
-          ? and(eq(aiAdvisorUsage.ipHash, ipHashKey), gt(aiAdvisorUsage.createdAt, since))
-          : null;
-        if (conditions) {
-          const rows = await db
-            .select({ c: sql<number>`COUNT(*)` })
-            .from(aiAdvisorUsage)
-            .where(conditions);
-          usage = Number(rows[0]?.c || 0);
-        }
-      }
-      return {
-        tier: "free" as const,
-        used: usage,
-        cap: FREE_TIER_LIMIT,
-        windowDays: FREE_TIER_WINDOW_DAYS,
-      };
+    // 2026-07-25 Jeff 裁定:AI 顧問對所有人免費,不再用會員等級決定額度。
+    // 原話:「我們的價格也不能比 chatgpt 或者 claude 貴」「也是免費好了」。
+    // 成本實算(haiku,每則輸入約 2000 + 輸出約 500 token)約 0.004 美元,
+    // 為此設會員門檻擋掉的生意遠大於省下的成本。
+    //
+    // 移除的只有「會員等級閘」。防濫用限流仍在 chat 內保留(IP 每小時、
+    // IP 每日、全站匿名每日;2026-07-26 R2 更正:先前誤寫 per-session),
+    // 那是成本天花板不是會員門檻,不得一併移除。
+    // 本 procedure 現在回傳 cap: -1(無上限),前端據此不再顯示額度膠囊與付費牆。
+    getQuota: publicProcedure.query(async () => {
+      return { tier: "free" as const, used: 0, cap: -1, windowDays: 30 };
     }),
 
     // Skill-enhanced AI chat with performance tracking.
@@ -188,62 +161,11 @@ export const aiRouter = router({
           }
         }
 
-        // Round 80.19: AI Advisor Phase 1 — tier-based rate limit.
-        // Free / anonymous users: 5 messages / rolling 30-day window.
-        // Plus / Concierge members: unlimited (still logged for abuse cap).
-        // We check BEFORE calling the LLM so users hitting the limit get
-        // an immediate paywall response instead of paying for one more
-        // turn.
-        const userTier = (ctx.user as any)?.tier || "free";
-        const isPaidTier = userTier === "plus" || userTier === "concierge";
-        const FREE_TIER_LIMIT = 5;
-        const FREE_TIER_WINDOW_DAYS = 30;
-
-        let usageBefore = 0;
-        if (!isPaidTier) {
-          // Compute identity key for rate limit: userId for logged-in,
-          // sha256(ip) for anonymous.
-          const { createHash } = await import("crypto");
-          const ipHashKey = ip ? createHash("sha256").update(ip).digest("hex").slice(0, 64) : null;
-          const userIdKey = ctx.user?.id ?? null;
-
-          // Count messages in the rolling 30-day window. Use raw SQL because
-          // Drizzle's count() doesn't support `gt` on timestamps cleanly here.
-          const { aiAdvisorUsage } = await import("../../drizzle/schema");
-          const { sql, and, gt, eq } = await import("drizzle-orm");
-          const { getDb } = await import("../db");
-          const db = await getDb();
-          if (db) {
-            const since = new Date(Date.now() - FREE_TIER_WINDOW_DAYS * 24 * 60 * 60 * 1000);
-            const conditions = userIdKey
-              ? and(eq(aiAdvisorUsage.userId, userIdKey), gt(aiAdvisorUsage.createdAt, since))
-              : ipHashKey
-              ? and(eq(aiAdvisorUsage.ipHash, ipHashKey), gt(aiAdvisorUsage.createdAt, since))
-              : null;
-            if (conditions) {
-              const rows = await db
-                .select({ c: sql<number>`COUNT(*)` })
-                .from(aiAdvisorUsage)
-                .where(conditions);
-              usageBefore = Number(rows[0]?.c || 0);
-            }
-          }
-
-          if (usageBefore >= FREE_TIER_LIMIT) {
-            throw new TRPCError({
-              code: "FORBIDDEN",
-              message: JSON.stringify({
-                kind: "QUOTA_EXCEEDED",
-                tier: "free",
-                used: usageBefore,
-                cap: FREE_TIER_LIMIT,
-                windowDays: FREE_TIER_WINDOW_DAYS,
-                upgradeUrl: "/membership",
-              }),
-            });
-          }
-        }
-
+        // 2026-07-25 Jeff 裁定:AI 顧問對所有人免費,無會員等級額度。
+        // 原話:「我們的價格也不能比 chatgpt 或者 claude 貴」「也是免費好了」。
+        // 上方的多層防濫用限流(IP 每小時、IP 每日、全站匿名每日/使用者每日)
+        // 是成本天花板,
+        // 與會員無關,保留不動。使用記錄照寫,供分析與濫用偵測。
         const { message, conversationHistory = [], sessionId } = input;
         const { processMessageWithSkills } = await import("../services/aiChatSkillService");
 
@@ -270,7 +192,8 @@ export const aiRouter = router({
                 sessionId: sessionId || null,
                 messagePreview: message.slice(0, 500),
                 tokenCount: 0, // could be filled from result if exposed
-                tier: userTier,
+                tier: "free", // 2026-07-25 起無付費等級,一律 free
+
               });
             }
           } catch (logErr) {
@@ -285,15 +208,8 @@ export const aiRouter = router({
               confidence: s.confidence,
             })),
             usageLogIds: result.usageLogIds,
-            // Round 80.19: surface remaining quota so the UI can show a counter.
-            quota: isPaidTier
-              ? null
-              : {
-                  used: usageBefore + 1, // we just consumed one
-                  cap: FREE_TIER_LIMIT,
-                  windowDays: FREE_TIER_WINDOW_DAYS,
-                  tier: "free" as const,
-                },
+            // 2026-07-25 起 AI 顧問免額度,quota 固定 null,前端不再顯示計數膠囊。
+            quota: null,
           };
         } catch (error) {
           console.error("[AI Chat] Error:", error);

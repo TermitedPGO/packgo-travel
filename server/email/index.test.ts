@@ -53,7 +53,9 @@ describe("server/email — public surface", () => {
     expect(typeof emailModule.sendVoucherIssuedEmail).toBe("function");
     expect(typeof emailModule.sendWinbackEmail).toBe("function");
     expect(typeof emailModule.sendCheckinEmail).toBe("function");
-    expect(typeof emailModule.sendTrialEndingReminder).toBe("function");
+    // 2026-07-26 R2(P2-2):sendTrialEndingReminder 已隨付費試用機制整組
+    // 移除(Jeff 裁定不應有付費會員機制),反向鎖定不得再出現。
+    expect((emailModule as any).sendTrialEndingReminder).toBeUndefined();
     expect(typeof emailModule.getTransporter).toBe("function");
   });
 });

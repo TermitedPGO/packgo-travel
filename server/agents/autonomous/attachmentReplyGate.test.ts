@@ -31,7 +31,6 @@ import {
   classifyAttachmentReply,
 } from "./attachmentReplyGate";
 import { stripMarkdownForEmail } from "../../_core/plainTextReply";
-import { buildUpgradeCta } from "../../_core/repurchaseCta";
 
 const att = (parseStatus: string, filename = "trip.pdf") => ({
   filename,
@@ -171,19 +170,20 @@ describe("advisory demotion — no draft is ever dropped, no send ever authorize
 // ══════════════════════════════════════════════════════════════════════
 
 describe("finalizeAutonomousDraft — canonicalization mechanics", () => {
-  it("canonicalizes the REAL Plus CTA copy: no **, no em dash, bodyText = canonical, escalates (attachment mail)", () => {
-    for (const lang of ["zh-TW", "en"]) {
-      const augmented =
-        "您好,行程建議如下,詳情我們再約時間討論。" +
-        buildUpgradeCta(lang, "https://packgoplay.com");
-      const r = fin(augmented);
-      expect(r.forceEscalate).toBe(true); // suspension — not a wording verdict
-      expect(r.droppedDraft).toBe(false);
-      expect(r.bodyText).toBe(stripMarkdownForEmail(augmented));
-      expect(r.bodyText).not.toContain("**");
-      expect(r.bodyText).not.toMatch(/[—–―‒]/);
-      expect(r.bodyText).toContain("PACK&GO Plus");
-    }
+  // 2026-07-26 R2(P0-1):Plus CTA 已整組移除,本測試改用等價的
+  // markdown 樣本維持 canonicalization 回歸(** 與 em dash 必須被剝掉),
+  // 並反向鎖定付費推銷字樣不得再出現在 finalize 輸出。
+  it("canonicalizes markdown-laden drafts: no **, no em dash, and never any paid-membership pitch", () => {
+    const augmented =
+      "您好,行程建議如下,詳情我們再約時間討論。" +
+      "\n\n— — — — —\nP.S. **重點** 請見附件 — 詳情另約。";
+    const r = fin(augmented);
+    expect(r.forceEscalate).toBe(true); // suspension — not a wording verdict
+    expect(r.droppedDraft).toBe(false);
+    expect(r.bodyText).toBe(stripMarkdownForEmail(augmented));
+    expect(r.bodyText).not.toContain("**");
+    expect(r.bodyText).not.toMatch(/[—–―‒]/);
+    expect(r.bodyText).not.toMatch(/PACK&GO Plus|免費試用|free trial/i);
   });
 
   it("non-readable attachment reason survives through finalize", () => {

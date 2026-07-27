@@ -1,11 +1,10 @@
 import { useState, useRef, useEffect, useCallback, useMemo } from "react";
-import { Link } from "wouter";
 import { Dialog, DialogContent, DialogTitle, DialogDescription } from "@/components/ui/dialog";
 import { VisuallyHidden } from "@radix-ui/react-visually-hidden";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
-  Send, Loader2, User, ThumbsUp, ThumbsDown, Sparkles, X, Lock, Check, ArrowRight
+  Send, Loader2, User, ThumbsUp, ThumbsDown, Sparkles, X
 } from "lucide-react";
 import { trpc } from "@/lib/trpc";
 import { Streamdown } from "streamdown";
@@ -128,21 +127,9 @@ export default function AITravelAdvisorDialog({ open, onOpenChange, initialMessa
     return t('aiAdvisor.greetingMember', { name: displayName });
   }, [isAuthenticated, user, t]);
 
-  // Round 80.19: AI Advisor Phase 1 — query current quota status when dialog
-  // opens so we can show the counter pill + paywall when limit hit.
-  const { data: quotaData, refetch: refetchQuota } = trpc.ai.getQuota.useQuery(
-    undefined,
-    {
-      enabled: open,
-      staleTime: 30_000,
-    }
-  );
-
-  const isPaidTier = quotaData?.tier === "plus" || quotaData?.tier === "concierge";
-  const used = quotaData?.used ?? 0;
-  const cap = quotaData?.cap ?? 5;
-  const remaining = isPaidTier ? Infinity : Math.max(0, cap - used);
-  const quotaExhausted = !isPaidTier && remaining <= 0;
+  // 2026-07-25 Jeff 裁定:AI 顧問對所有人免費,額度計數與付費牆已移除。
+  // 防濫用限流在伺服器端(IP 每小時、IP 每日、全站匿名每日/使用者每日),超限時
+  // chat 會回錯誤,由下方一般錯誤處理呈現,不再導去 /membership。
   const [messages, setMessages] = useState<Message[]>(() => [
     {
       role: "assistant",
@@ -315,11 +302,8 @@ export default function AITravelAdvisorDialog({ open, onOpenChange, initialMessa
       clearTimeout(timeoutId);
       setIsStreaming(false);
       abortControllerRef.current = null;
-      // Round 80.19: refresh quota after each turn so the counter pill
-      // updates without dialog-reopen.
-      refetchQuota();
     }
-  }, [sessionId, t, tArray, refetchQuota]);
+  }, [sessionId, t, tArray]);
 
   const feedbackMutation = trpc.ai.recordFeedback.useMutation({
     onSuccess: () => {
@@ -650,93 +634,35 @@ export default function AITravelAdvisorDialog({ open, onOpenChange, initialMessa
           <div ref={messagesEndRef} />
         </div>
 
-        {/* Round 80.19: Phase 1 paywall — when free quota exhausted, replace
-            input area with upgrade card. Plus / Concierge bypass entirely. */}
-        {quotaExhausted ? (
-          <div className="px-4 py-4 border-t border-foreground/10 bg-foreground text-white shrink-0">
-            <div className="flex items-start gap-3 mb-3">
-              <div className="w-9 h-9 rounded-full bg-[#c9a563]/20 flex items-center justify-center flex-shrink-0">
-                <Lock className="w-4 h-4 text-[#c9a563]" />
-              </div>
-              <div className="flex-1 min-w-0">
-                <p className="font-semibold text-white text-sm">{t('aiAdvisor.paywallTitle')}</p>
-                <p className="text-xs text-white/70 mt-0.5">{t('aiAdvisor.paywallSubtitle')}</p>
-              </div>
-            </div>
-            <ul className="space-y-1.5 mb-4 ml-1 text-xs text-white/85">
-              <li className="flex items-start gap-2">
-                <Check className="w-3 h-3 text-[#c9a563] flex-shrink-0 mt-0.5" />
-                <span>{t('aiAdvisor.paywallBenefit1')}</span>
-              </li>
-              <li className="flex items-start gap-2">
-                <Check className="w-3 h-3 text-[#c9a563] flex-shrink-0 mt-0.5" />
-                <span>{t('aiAdvisor.paywallBenefit2')}</span>
-              </li>
-              <li className="flex items-start gap-2">
-                <Check className="w-3 h-3 text-[#c9a563] flex-shrink-0 mt-0.5" />
-                <span>{t('aiAdvisor.paywallBenefit3')}</span>
-              </li>
-            </ul>
-            <Link
-              href="/membership"
-              onClick={() => onOpenChange(false)}
-              className="inline-flex items-center gap-2 bg-[#c9a563] text-foreground hover:bg-[#d4b478] transition-colors text-xs font-semibold px-4 py-2 rounded-lg w-full justify-center"
+        {/* Input Area — clean, no gradient, brand-aligned */}
+        <div className="px-4 py-3 border-t border-foreground/10 bg-white shrink-0">
+          <div className="flex gap-2 items-center">
+            <Input
+              value={input}
+              onChange={(e) => setInput(e.target.value)}
+              onKeyPress={handleKeyPress}
+              placeholder={t('aiAdvisor.inputPlaceholder')}
+              className="flex-1 h-11 border border-foreground/15 rounded-lg px-4 focus-visible:ring-2 focus-visible:ring-foreground/20 focus-visible:ring-offset-0 focus-visible:border-foreground/40 bg-white text-foreground"
+              disabled={isStreaming}
+              aria-label={t('aiAdvisor.inputPlaceholder')}
+            />
+            <Button
+              onClick={handleSend}
+              disabled={!input.trim() || isStreaming}
+              className="h-11 w-11 bg-foreground hover:bg-foreground/90 rounded-lg p-0 flex items-center justify-center shadow-sm disabled:opacity-40"
+              aria-label={t('aiAdvisor.sendMessage')}
             >
-              {t('aiAdvisor.paywallCta')}
-              <ArrowRight className="w-3.5 h-3.5" />
-            </Link>
+              {isStreaming ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                <Send className="h-4 w-4" />
+              )}
+            </Button>
           </div>
-        ) : (
-          <>
-            {/* Round 80.19: subtle counter pill — only shows when used >= 3
-                so first-time visitors don't feel rationed. Plus members
-                see no counter at all. */}
-            {!isPaidTier && used >= 3 && (
-              <div className="px-4 py-2 bg-foreground/[0.03] border-t border-foreground/8 flex items-center justify-between text-[11px] shrink-0">
-                <span className="text-foreground/60">
-                  {t('aiAdvisor.quotaRemaining', { remaining: String(remaining), cap: String(cap) })}
-                </span>
-                <Link
-                  href="/membership"
-                  onClick={() => onOpenChange(false)}
-                  className="text-[#8a6f3a] hover:text-[#c9a563] font-medium"
-                >
-                  {t('aiAdvisor.quotaUpgrade')}
-                </Link>
-              </div>
-            )}
-
-            {/* Input Area — clean, no gradient, brand-aligned */}
-            <div className="px-4 py-3 border-t border-foreground/10 bg-white shrink-0">
-              <div className="flex gap-2 items-center">
-                <Input
-                  value={input}
-                  onChange={(e) => setInput(e.target.value)}
-                  onKeyPress={handleKeyPress}
-                  placeholder={t('aiAdvisor.inputPlaceholder')}
-                  className="flex-1 h-11 border border-foreground/15 rounded-lg px-4 focus-visible:ring-2 focus-visible:ring-foreground/20 focus-visible:ring-offset-0 focus-visible:border-foreground/40 bg-white text-foreground"
-                  disabled={isStreaming}
-                  aria-label={t('aiAdvisor.inputPlaceholder')}
-                />
-                <Button
-                  onClick={handleSend}
-                  disabled={!input.trim() || isStreaming}
-                  className="h-11 w-11 bg-foreground hover:bg-foreground/90 rounded-lg p-0 flex items-center justify-center shadow-sm disabled:opacity-40"
-                  aria-label={t('aiAdvisor.sendMessage')}
-                >
-                  {isStreaming ? (
-                    <Loader2 className="h-4 w-4 animate-spin" />
-                  ) : (
-                    <Send className="h-4 w-4" />
-                  )}
-                </Button>
-              </div>
-              <p className="text-[10px] text-foreground/40 mt-2 text-center tracking-wide">
-                {t('aiAdvisor.disclaimer')}
-              </p>
-            </div>
-          </>
-        )}
+          <p className="text-[10px] text-foreground/40 mt-2 text-center tracking-wide">
+            {t('aiAdvisor.disclaimer')}
+          </p>
+        </div>
       </DialogContent>
     </Dialog>
   );

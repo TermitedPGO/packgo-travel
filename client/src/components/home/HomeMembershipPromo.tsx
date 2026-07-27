@@ -1,21 +1,15 @@
 /**
- * Round 80.21: Membership promo block on Home — recurring-value pitch
- * that lives between WhyChooseUs (operational trust) and Testimonials
- * (social proof).
- *
- * Reuses the brand baseline (B&W + Gold). Highlights Plus tier as the
- * "most popular" option with 4 concrete benefits + dual CTA (yearly
- * primary, browse details secondary).
- *
- * Doesn't try to be a mini /membership page — surfaces the hook + one
- * click to the full comparison.
+ * 首頁會員促銷區塊。2026-07-25 Jeff 裁定會員制為免費單層,本區塊
+ * 從付費 Plus 推銷卡改為免費會員說明卡:無價格、無月付年付、無試用。
+ * 權益只講有實作的 Packpoint 積分(100 點 = $1 折抵是 packpoint.ts 的
+ * 既有換算)。倍率、上限、效期未定案,文案不得出現具體倍數承諾。
  */
 import { Link } from "wouter";
 import { Star, ArrowRight, Check } from "lucide-react";
 import { useLocale } from "@/contexts/LocaleContext";
 
 export default function HomeMembershipPromo() {
-  const { t, formatPrice } = useLocale();
+  const { t } = useLocale();
 
   return (
     <section className="py-16 md:py-24 bg-foreground text-white">
@@ -50,30 +44,18 @@ export default function HomeMembershipPromo() {
             </div>
           </div>
 
-          {/* Right: benefit card with Plus tier preview */}
+          {/* Right: free membership benefit card */}
           <div className="bg-white/[0.04] border border-[#c9a563]/30 rounded-xl p-6 md:p-8 backdrop-blur-sm">
             <div className="flex items-baseline gap-2 mb-1">
               <span className="text-xs uppercase tracking-[0.2em] text-[#c9a563] font-semibold">
-                {t("homeMembership.plusBadge")}
-              </span>
-              <span className="text-[10px] uppercase tracking-wider font-bold text-foreground bg-[#c9a563] px-1.5 py-0.5 rounded">
-                {t("homeMembership.popular")}
+                {t("homeMembership.freeBadge")}
               </span>
             </div>
-            <div className="flex items-baseline gap-2 mb-1 flex-wrap">
+            <div className="flex items-baseline gap-2 mb-5 flex-wrap">
               <span className="text-4xl md:text-5xl font-bold text-white tracking-tight">
-                {/* Round 80.22: convert from USD to user's currency. Stripe billing
-                    is USD; display reflects locale switcher. */}
-                {formatPrice(89, "USD")}
-              </span>
-              <span className="text-sm text-white/50">/ {t("homeMembership.year")}</span>
-              <span className="text-xs text-white/40 ml-1">
-                {t("homeMembership.orMonthly")}
+                {t("homeMembership.freePrice")}
               </span>
             </div>
-            <p className="text-xs text-[#c9a563] font-medium mb-5">
-              {t("homeMembership.savingsHint")}
-            </p>
             <ul className="space-y-2.5">
               {[
                 t("homeMembership.benefit1"),
