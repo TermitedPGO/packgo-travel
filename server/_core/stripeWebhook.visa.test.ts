@@ -161,7 +161,6 @@ vi.mock("./notification", () => ({
 vi.mock("../email", () => ({
   sendPaymentSuccessEmail: vi.fn(async () => undefined),
   sendSupplierNotificationEmail: vi.fn(async () => undefined),
-  sendTrialEndingReminder: vi.fn(async () => undefined),
 }));
 
 vi.mock("./agentNotify", () => ({

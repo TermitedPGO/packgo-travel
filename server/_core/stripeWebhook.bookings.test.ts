@@ -355,7 +355,6 @@ vi.mock("../email", () => ({
   sendSupplierNotificationEmail: vi.fn(async () => {
     store.sideEffects.supplierEmailCalls += 1;
   }),
-  sendTrialEndingReminder: vi.fn(async () => {}),
 }));
 vi.mock("../services/visaEmailService", () => ({
   sendVisaApplicationConfirmation: vi.fn(async () => {}),
@@ -386,9 +385,6 @@ vi.mock("./websiteIntake", () => ({
 }));
 vi.mock("./redact", () => ({
   redactEmail: (e: string) => e,
-}));
-vi.mock("./membershipPricing", () => ({
-  tierFromPriceId: () => null,
 }));
 
 // Stripe constructor + webhooks.constructEvent — return the event passed via

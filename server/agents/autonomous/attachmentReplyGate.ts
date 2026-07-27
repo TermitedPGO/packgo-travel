@@ -1010,7 +1010,7 @@ export interface FinalizeAutonomousDraftResult {
 /**
  * The FINAL canonical chokepoint for autonomous sends (Codex 16:02 P1-3;
  * demoted to suspension + advisory by Codex 12:01 §五). Runs AFTER all
- * augmentation (CTA append etc.). For attachment mail it ALWAYS escalates —
+ * mutation(歷史上含已移除的 CTA append)。For attachment mail it ALWAYS escalates —
  * the draft is preserved for Jeff, with the risk hint in the reason. Callers
  * MUST hand `bodyText` to sendReplyInThread verbatim (the MIME builder adds
  * its own fixed footer; safety normalization never enters bodyText).

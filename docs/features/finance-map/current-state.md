@@ -19,7 +19,7 @@
 
 | 通道 | 真實整合程度 | 觸發點 | 寫入表 |
 |------|------------|--------|--------|
-| Stripe(信用卡) | 唯一有完整 API+webhook+DB 寫入的通道 [F] | Checkout Session | payments / bookings / visaApplications / accountingEntries / users(訂閱) |
+| Stripe(信用卡) | 唯一有完整 API+webhook+DB 寫入的通道 [F] | Checkout Session | payments / bookings / visaApplications / accountingEntries / users(歷史訂閱欄位,機制已移除) |
 | Square(訂製單催款) | 純接口佔位,無真實 Payment Links API 整合 [F] | Jeff 手貼收款連結 + 手動記帳 | customOrders(depositPaidAt/balancePaidAt 等) |
 | Zelle / 電匯 / 支票 | 客人直接匯進 Jeff 的 BofA 帳戶,網站完全不觸發 [F] | Plaid 同步 | bankTransactions(事後 AI 分類) |
 | 現金 | 客服聊天機器人話術提及,但零程式路徑 [F][I] | 無 | 無(全靠 Jeff 事後手動走 accountingEntries) |
@@ -28,7 +28,7 @@
 **Stripe 詳細**:
 - 團費:`trpc.bookings.createCheckoutSession`,`payment_method_types: ["card"]`,只收信用卡。[F] `server/routers/bookingsPayment.ts:184-201`
 - 簽證代辦費:同樣走 Stripe Checkout,card only。[F] `server/routers/visa.ts:117,131`
-- 會員訂閱(Plus/Concierge):Stripe Checkout `mode=subscription`,10 天試用(AB 390 合規)。[F] `server/routers/membership.ts:171-189`
+- ~~會員訂閱(Plus/Concierge)~~:已於 2026-07-26 隨付費會員機制整組移除(membership.ts 只剩 getStatus;webhook 訂閱事件處理同批刪除)。
 - Webhook 掛載點:`app.post("/api/stripe/webhook", ...)`。[F] `server/_core/index.ts:242`
 - `payments.paymentMethod` 是 enum('stripe','paypal','bank_transfer','cash','other'),但全 repo 唯一呼叫 `db.createPayment()` 的地方永遠寫死 'stripe' — 其餘三個 enum 值從未被實際寫入過。[F] `drizzle/schema.ts:799-825`,呼叫點 `server/_core/stripeWebhook.ts:258`
 
@@ -45,17 +45,17 @@
 
 ### 1.2 Stripe Webhook 完整處理路徑
 
-處理 8 種 event type,其餘落 default 只 log。[F] `server/_core/stripeWebhook.ts:73-145`
+處理 7 種 event type(2026-07-26 起:訂閱事件已移除),其餘落 default 只 log。[F] `server/_core/stripeWebhook.ts:73-145`
 
 | Event | 動作 | 寫入 |
 |-------|------|------|
 | `checkout.session.completed`(訂單) | 單一 tx 原子寫入 | payments + bookings(paymentStatus/bookingStatus) + accountingEntries(income) |
 | `checkout.session.completed`(簽證) | 單一 tx 原子寫入 | visaApplications + visaStatusHistory + accountingEntries(income) |
-| `checkout.session.completed`(訂閱) | 單一 tx | users(tier/tierExpiresAt) + membershipTrials |
+| ~~`checkout.session.completed`(訂閱)~~ 已移除(2026-07-26) | — | ~~users(tier/tierExpiresAt) + membershipTrials |
 | `payment_intent.succeeded/failed` | 單一欄位更新 | payments.paymentStatus |
 | `charge.refunded/refund.updated` | 只處理全額退款,原子條件式 UPDATE | payments + bookings(cancelled) + Packpoint 扣回 + RefundAgent triage(絕不自動送出) |
 | `charge.dispute.*` | 僅通知,不寫帳 | 無 |
-| `customer.subscription.*` | tier 狀態機 | users(tier reset) |
+| ~~`customer.subscription.*`~~ 已移除(2026-07-26) | — | — |
 
 - 三個寫入(payments/bookings/accountingEntries)包在同一 `db.transaction`,原子性。[F] `server/_core/stripeWebhook.ts:257-296`
 - Idempotency:`stripeWebhookEvents.eventId` UNIQUE 約束擋重放;`claimStripeEvent`/`markStripeEventSucceeded`/`markStripeEventFailed` 三段式狀態機。[F] `server/_core/stripeWebhookIdempotency.ts:54-108`;`drizzle/schema.ts:841-854`

@@ -52,8 +52,7 @@ const FAQ = lazy(() => import("./pages/FAQ"));
 const ContactUs = lazy(() => import("./pages/ContactUs"));
 const Emergency = lazy(() => import("./pages/Emergency"));
 const Membership = lazy(() => import("./pages/Membership"));
-// Round 81 / migration 0075 — AB 390 mandatory auto-renewal disclosure page.
-// Linked from Membership.tsx pre-checkout + from Stripe Checkout cancel_url.
+// 2026-07-25 起為免費會員條款暫行版(付費機制已移除,詳見該頁檔頭)。
 const MembershipTerms = lazy(() => import("./pages/MembershipTerms"));
 const Rewards = lazy(() => import("./pages/Rewards"));
 const SearchResults = lazy(() => import("./pages/SearchResults"));
@@ -64,7 +63,8 @@ const CruisePage = lazy(() => import("./pages/CruisePage"));
 const PaymentSuccess = lazy(() => import("./pages/PaymentSuccess"));
 const PaymentFailure = lazy(() => import("./pages/PaymentFailure"));
 const TaskHistory = lazy(() => import("./pages/TaskHistory"));
-const AIAdvisorMockup = lazy(() => import("./pages/preview/AIAdvisorMockup"));
+// 2026-07-26 R2(P1-1):付費牆 mockup 頁下架。付費機制已依 Jeff 裁定整組移除,
+// 這頁展示的四態付費牆(含 $99/$399 定價)不得再公開可達。
 const ToursTabMockup = lazy(() => import("./pages/preview/ToursTabMockup"));
 
 // ─── Loading fallback ─────────────────────────────────────────────────────────
@@ -212,7 +212,6 @@ function Router() {
       <Route path={"/ops"}>{() => <AdminShell><AdminHome /></AdminShell>}</Route>
 
       {/* Round 80.9: internal preview routes (mockups for product decisions) */}
-      <Route path={"/preview/ai-advisor-mockup"} component={AIAdvisorMockup} />
       <Route path={"/preview/tours-tab-mockup"} component={ToursTabMockup} />
 
       <Route path={"/404"} component={NotFound} />

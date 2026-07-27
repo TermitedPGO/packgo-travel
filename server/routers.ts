@@ -111,7 +111,7 @@ export const appRouter = router({
   // Authentication router — Phase 4E extracted to ./routers/auth.ts
   auth: authRouter,
   
-  // Round 80.20: Membership Phase 2 — Stripe subscription lifecycle.
+  // Membership:2026-07-26 起免費單層,Stripe 訂閱生命週期已整組移除,只剩 getStatus。
   // Public endpoints for /membership page; webhook handles tier flips.
   // Membership router — Phase 4E extracted to ./routers/membership.ts
   membership: membershipRouter,

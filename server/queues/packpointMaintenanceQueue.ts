@@ -7,7 +7,7 @@
  *   1. Auto-upgrade tier
  *      Free  → Plus      when rolling 12mo spend ≥ $5,000
  *      Plus  → Concierge when rolling 12mo spend ≥ $20,000
- *      Idempotent: tier already matches OR within paid-tier window? skip.
+ *      Idempotent: tier already matches or higher? skip.(2026-07-26:付費層已移除)
  *
  *   2. 18-month inactivity expiry
  *      Any user with packpointBalance > 0 AND lastActivityAt < 18mo ago →
@@ -220,7 +220,6 @@ async function runAutoUpgrade(result: PackpointMaintenanceJobResult) {
         id: users.id,
         tier: users.tier,
         tierExpiresAt: users.tierExpiresAt,
-        stripeSubscriptionId: users.stripeSubscriptionId,
       })
       .from(users)
       .where(eq(users.id, row.userId))
@@ -233,9 +232,9 @@ async function runAutoUpgrade(result: PackpointMaintenanceJobResult) {
     const targetRank = tierRank[targetTier];
     if (currentRank >= targetRank) continue;
 
-    // Skip if user has active paid subscription — they're already paying for
-    // tier benefits, no need to override. Only auto-upgrade when no active sub.
-    if (user.stripeSubscriptionId) continue;
+    // 2026-07-26 R2(P1-2):原本這裡會因 stripeSubscriptionId 有值而跳過
+    // 免費升等。付費機制已依 Jeff 裁定整組移除,該欄位只是歷史資料,
+    // 不得再影響免費會員的升等行為,分支刪除。
 
     // Upgrade: set tier + 12-month grace period as tierExpiresAt
     const newExpiresAt = new Date(Date.now() + 365 * 24 * 60 * 60 * 1000);
@@ -366,3 +365,10 @@ async function runBirthdayBonus(result: PackpointMaintenanceJobResult) {
     console.log(`[PackpointMaintenance] ✓ Birthday +${BIRTHDAY_BONUS_POINTS} for user ${u.id}`);
   }
 }
+
+// ─────────────────────────────────────────────────────────────────────
+// Test-only export(2026-07-26 R3,返工單第 3 項)。終驗指出 token 掃描
+// 擋不住「刪掉 DB update 本體」的回歸,行為測試需要直接呼叫升等迴圈。
+// 只供 Vitest 使用,runtime 不得 import。
+// ─────────────────────────────────────────────────────────────────────
+export const __test__ = { runAutoUpgrade };

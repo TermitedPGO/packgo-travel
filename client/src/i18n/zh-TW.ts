@@ -818,13 +818,13 @@ export const zhTW = {
   // Round 80.19: Membership Phase 1
   membership: {
     seoTitle: '會員方案｜PACK&GO 旅行社',
-    seoDesc: 'PACK&GO 會員享 AI 旅遊顧問無限對話、Packpoint 點數累積、優先支援。Plus $89/年,Concierge $349/年。',
+    seoDesc: 'PACK&GO 免費會員。Packpoint 點數累積換現金,訂行程與參與活動都能累積,滿額自動升等。不收年費,不自動扣款。',
     eyebrow: 'MEMBERSHIP',
     heroTitle: '為常旅行的家庭設計',
-    heroSubtitle: '從規劃到回國,有人接住每一段。AI 顧問無限用、出發前 60 天免費改期、1 對 1 顧問、Packpoint 點數累積換現金 — Plus 會員年費 $89,值回一張機票。',
+    heroSubtitle: '免費加入,不收年費也不綁約。訂行程、參與活動都能累積 Packpoint,點數可折抵團費與客製行程,累積滿額自動升等。',
     popular: '最受歡迎',
     softLaunchEyebrow: 'Phase 1 預約制',
-    softLaunchBody: '會員方案目前以「等候名單」啟動,訂閱付費功能將於 Phase 2 上線。先加入名單你會搶先收到開放邀請,額度有限。',
+    softLaunchBody: '會員完全免費,不收年費也不綁約。註冊即開始累積 Packpoint,點數可折抵團費與客製行程。',
     contactHint: '有問題?直接聊',
     // Free tier
     freeTitle: 'Free',
@@ -832,55 +832,37 @@ export const zhTW = {
     freeTagline: '基本探索,完全免費',
     freeCta: '立即使用',
     // Plus tier
-    plusTitle: 'Plus',
-    plusPrice: '$89',
-    plusPeriod: '/ 年',
-    plusPriceMonthly: '$9.99',
-    plusPeriodMonthly: '/ 月',
-    plusYearlySave: '年付省 $30(等於 3 個月免費 · 26% off)',
-    plusTagline: '常出國家庭最划算',
-    plusCta: '加入等候名單',
     // Concierge tier
-    conciergeTitle: 'Concierge',
-    conciergePrice: '$349',
-    conciergePeriod: '/ 年',
-    conciergePriceMonthly: '$39.99',
-    conciergePeriodMonthly: '/ 月',
-    conciergeYearlySave: '年付省 $130(等於 3 個月免費 · 27% off)',
-    conciergeTagline: '專屬顧問,白手套服務',
-    conciergeCta: '加入等候名單',
     // Round 80.21: yearly/monthly toggle
-    toggleYearly: '年付',
-    toggleMonthly: '月付',
-    toggleSaveBadge: '省 26%',
     // Features (shared)
-    featAiFree: 'AI 旅遊顧問(每月 5 則)',
-    featAiUnlimited: 'AI 旅遊顧問無限對話',
-    featNewsletter: '每月電子報 + 早鳥行程通知',
-    featPhotoBook: '年度旅遊相片書(每年一本)',
+    // 2026-07-26 R2:付費層與服務承諾型權益的 key 已全數刪除(Codex P2-1)。
+    // 會員權益只留 Packpoint,依 Jeff 2026-07-25 裁定。
     // Round 80.22: % discount removed → Packpoint accumulation system.
     // Base rate: 1% on every booking. Tier multipliers (1x/5x/10x) on top.
     // Tour multiplier (default 0.25x for thin-margin) controlled by Jeff
     // in admin so commission isn't eaten by Packpoint cost. Auto-upgrade
     // path lets Free users earn Plus tier through cumulative spend.
     featPackpointFree: 'Packpoint 基礎累積(1x)',
-    featPackpointPlus: 'Packpoint 5x 加速累積',
-    featPackpointConcierge: 'Packpoint 10x 加速累積(活動最高 20x)',
     featPackpointBonuses: '註冊 +50 / 評論 +50 / 推薦 +500 / 生日 +100 Packpoint',
-    featAutoUpgrade: '12 個月累積 $5,000 自動升 Plus(免年費)',
-    featNoFeeChange: '出發前 60 天免費改期',
-    featDedicatedAdvisor: '1 對 1 顧問(4h 內回覆)',
+    featAutoUpgrade: '累積滿額自動提高回饋倍率,不需申請也不需付費',
     // Phase 2 dynamic CTAs
-    subscribeNow: '立即訂閱',
-    loginToSubscribe: '登入後訂閱',
-    manageSubscription: '管理訂閱',
-    freeTrialBadge: '10 天免費試用',
-    startFreeTrial: '開始 10 天免費試用',
-    trialDisclosure: '10 天免費試用，結束後自動扣款。可隨時線上取消，無需電話。',
-    trialFullTermsLink: '完整條款',
-    subscribeSuccess: '訂閱成功!歡迎成為 PACK&GO 會員',
-    subscribeCanceled: '已取消訂閱流程',
-    checkoutError: '結帳暫時無法使用,請稍後再試或聯絡客服',
+  },
+  membershipTerms: {
+    seoTitle: '會員條款｜PACK&GO Travel LLC',
+    seoDesc: 'PACK&GO 免費會員條款。不收年費,無自動扣款,Packpoint 點數累積與折抵。',
+    pageTitle: '會員條款',
+    pageSubtitle: 'Pack & Go, LLC · 加州旅行社註冊 CST #2166984 · 暫行版',
+    s1Title: '1. 會員完全免費',
+    s1Body: 'PACK&GO 會員完全免費。沒有年費,沒有訂閱,沒有自動扣款,加入會員不需要提供任何付款方式。是否為會員不影響任何旅遊服務的售價。',
+    s2Title: '2. Packpoint 點數',
+    s2Body: '會員於符合條件的訂單與活動累積 Packpoint,點數可依 100 點 = 1 美元折抵團體行程與客製旅行。累積倍率、上限與效期仍在定案中,正式生效前會先在本站公告;在公告之前,已載明的折抵方式是唯一具拘束力的條款。',
+    s3Title: '3. 聯絡方式',
+    s3Body: '會員相關問題:+1 (510) 634-2307 · support@packgoplay.com · 39055 Cedar Blvd #126, Newark, CA 94560。',
+    interimPrefix: '本頁為暫行版本,正式條款待律師審閱後公布。另請參閱',
+    tosLinkText: '服務條款',
+    interimAnd: '與',
+    privacyLinkText: '隱私權政策',
+    interimSuffix: '。',
   },
 
   // Round 80.21/80.22: Home page membership promo block.
@@ -888,20 +870,17 @@ export const zhTW = {
   // base rate; engagement bonuses (refer / review / birthday) accumulate
   // for every tier so the perks feel concrete even before promo tours.
   homeMembership: {
+    freeBadge: '免費會員',
+    freePrice: '免費加入',
     eyebrow: 'PACK&GO 會員',
-    title: '常旅行?加入 Plus 會員,1 趟旅遊就回本',
-    subtitle: '每年 $89(月付 $9.99)享 AI 顧問無限對話、出發前 60 天免費改期、Packpoint 5x 加速累積換現金 — 一張機票就值回會員費。',
-    ctaPrimary: '看會員方案',
-    ctaSecondary: '了解 Concierge $349',
-    plusBadge: 'Plus 會員',
-    popular: '熱門',
-    year: '年',
-    orMonthly: '或 $9.99 / 月',
-    savingsHint: '年付省 $30(等於 3 個月免費 · 26% off)',
-    benefit1: 'AI 旅遊顧問無限對話 + 完整 markdown 行程',
-    benefit2: 'Packpoint 5x 加速累積(100 點 = $1 折抵)',
-    benefit3: '出發前 60 天無限免費改期',
-    benefit4: '優先支援(4h 內回覆)+ 年度旅遊相片書',
+    title: '免費會員,每一趟旅程都在累積',
+    subtitle: '免費會員,不收年費。Packpoint 點數累積換現金,可折抵團費與客製行程 — 註冊、評論、推薦、生日都能額外加點。',
+    ctaPrimary: '看會員權益',
+    ctaSecondary: '看點數怎麼累積',
+    benefit1: 'Packpoint 點數累積,可折抵團費與客製行程',
+    benefit2: 'Packpoint 換現金折抵(100 點 = $1)',
+    benefit3: '註冊 · 評論 · 推薦 · 生日 額外加點',
+    benefit4: '累積滿額自動升等,不需另外申請',
   },
 
   // Round 80.13: Hero search bar (auto-suggest)
@@ -1842,7 +1821,7 @@ export const zhTW = {
     currentTier: '當前等級',
     recentTransactions: '最近交易',
     noTransactionsYet: '尚無交易記錄',
-    autoUpgradeHint: '$5,000/年自動升 Plus',
+    autoUpgradeHint: '累積滿額自動提高回饋倍率',
     redemptionEquivalent: '≈ ${amount} 折抵',
     tierFreeMember: 'Free 會員',
     tierPlusMember: 'Plus 會員',
@@ -6360,14 +6339,6 @@ export const zhTW = {
     disclaimer: 'AI 回答僅供參考，實際行程請以客服確認為準',
     // Round 80.19: Phase 1 quota
     greetingMember: '歡迎回來,{name}!想去哪裡?告訴我目的地、天數、預算或興趣,我幫你客製。',
-    quotaRemaining: '本月剩 {remaining} / {cap} 則免費對話',
-    quotaUpgrade: '升級無限',
-    paywallTitle: '本月免費額度已用完',
-    paywallSubtitle: '升級 Plus 會員享無限 AI 顧問',
-    paywallBenefit1: '無限對話 + 完整 markdown 行程',
-    paywallBenefit2: '所有訂單 5% 折扣 (年省 $200+)',
-    paywallBenefit3: '出發前 60 天免費改期',
-    paywallCta: '看會員方案 ($99/年)',
     askQuestion: '問我問題！',
     minimize: '最小化對話框',
     close: '關閉對話框',

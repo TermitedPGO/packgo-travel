@@ -27,7 +27,7 @@
  * (mirroring the one in routers.ts). Since these are the only two procedures
  * in bookings.ts that called it, the initializer was moved here entirely; the
  * `bookings.ts` copy was removed. routers.ts still keeps its own copy for visa
- * + subscription procedures that haven't been extracted yet.
+ *(2026-07-26:membership 訂閱 procedures 已隨付費機制移除,不再有未拆項)
  */
 
 import { z } from "zod";

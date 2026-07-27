@@ -52,7 +52,7 @@
 | 14 | 登入/註冊 | `/login` Login.tsx | audit | C4 |
 | 23 | 會員中心 | `/profile` Profile.tsx | 重構+拆檔 | C4 |
 | 25 | 帳戶設定 | Profile 設定區 | audit | C4 |
-| 11 | 會員訂閱 | `/membership` Membership.tsx | audit | C4 |
+| 11 | 會員頁(免費制,2026-07-26 起無訂閱) | `/membership` Membership.tsx | audit | C4 |
 | 22 | PackPoint 詳情 | `/rewards` Rewards.tsx | audit | C4 |
 | 17 | 評價 | BookingDetail 內嵌表單 | 重構(補「我的評價」) | C4 |
 | 18 | 通知中心 | 無 | 新功能(最小 schema) | C5 |

@@ -3,7 +3,7 @@
  * (Codex 16:02 P1-3, pdf-attachment-reliability batch-3).
  *
  * Proves, through runGmailPipelineForMessageIds → processOneEmail, that:
- *   1. After the Plus CTA append (real CTA copy, which deliberately carries
+ *   1. After autonomous draft mutation(歷史上為 Plus CTA,2026-07-26 已移除,
  *      Markdown ** and em dashes), the ACTUAL bodyText handed to
  *      sendReplyInThread is canonicalized (stripMarkdownForEmail) — same
  *      bytes the final gate scanned. (Attachment-free control — the only
@@ -27,7 +27,7 @@
  *
  * Heavy collaborators are mocked (same wiring family as gmailPipeline.lock /
  * .funnel tests); attachmentReplyGate + autoSendGate + stripMarkdownForEmail
- * + the real CTA copy run REAL.
+ * + canonicalization run REAL(CTA 已移除,改以 markdown 樣本承擔)。
  */
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
@@ -181,27 +181,17 @@ vi.mock("../skills/dispatcher", () => ({
 vi.mock("../../_core/llm", () => ({
   invokeLLM: vi.fn(async () => ({ choices: [] })),
 }));
-// CTA append: force the "appended" branch with the REAL CTA copy so the
-// pipeline regression exercises the actual Markdown/em-dash bytes.
-vi.mock("../../_core/repurchaseCta", async () => {
-  const actual = await vi.importActual<typeof import("../../_core/repurchaseCta")>(
-    "../../_core/repurchaseCta",
-  );
-  return {
-    ...actual,
-    maybeAppendUpgradeCta: vi.fn(async (args: { draftReply: string; language?: string }) => ({
-      draftReply:
-        args.draftReply + actual.buildUpgradeCta(args.language, "https://packgoplay.com"),
-      appended: true,
-      reason: "appended",
-    })),
-  };
-});
+// 2026-07-26 R2(P0-1):CTA 已整組移除。inquiryCounter 直接 mock 成
+// no-op,只驗證管線不因計數失敗而倒,也不再有任何草稿附加。
+vi.mock("../../_core/inquiryCounter", () => ({
+  recordInquiry: vi.fn(async () => ({ recorded: true, reason: "recorded" })),
+}));
+// R3:recordInquiry 的 mock 預設成功;下方另有一條測試把它改成 reject,
+// 證明計數失敗不擋寄信(non-fatal 語義是行為,不是註解)。
 
 import { runGmailPipelineForMessageIds } from "./gmailPipeline";
 import { classifyAttachmentReply } from "./attachmentReplyGate";
 import { stripMarkdownForEmail } from "../../_core/plainTextReply";
-import { buildUpgradeCta } from "../../_core/repurchaseCta";
 
 const BASE_DECISION = {
   classification: "new_inquiry",
@@ -245,19 +235,25 @@ describe("final canonical send chokepoint — pipeline regression (Codex 16:02 P
     runInquiryAgentMock.mockReset();
   });
 
-  it("CTA path: the ACTUAL sent body is canonicalized — no **, no em dash, exact stripMarkdownForEmail bytes", async () => {
+  // 2026-07-26 R2(P0-1,Jeff 裁定不應有付費會員機制):
+  // 寄出的信不得再附加任何 Plus 推銷。canonicalization 回歸改由
+  // markdown 樣本承擔;本測試同時反向鎖定付費字樣。
+  it("sent body is canonicalized AND never contains a paid-membership pitch", async () => {
     listMessagesByIdsMock.mockResolvedValue([baseMsg([])]);
-    runInquiryAgentMock.mockResolvedValue({ ...BASE_DECISION });
+    runInquiryAgentMock.mockResolvedValue({
+      ...BASE_DECISION,
+      draftReply: BASE_DECISION.draftReply + "\n\n**附註** 行程細節 — 已附上。",
+    });
 
     await runGmailPipelineForMessageIds(7);
 
     expect(sendReplyInThreadMock).toHaveBeenCalledTimes(1);
     const sent = sendReplyInThreadMock.mock.calls[0][1] as { bodyText: string };
     const expectedCanonical = stripMarkdownForEmail(
-      BASE_DECISION.draftReply + buildUpgradeCta("zh-TW", "https://packgoplay.com"),
+      BASE_DECISION.draftReply + "\n\n**附註** 行程細節 — 已附上。",
     );
     expect(sent.bodyText).toBe(expectedCanonical);
-    expect(sent.bodyText).toContain("PACK&GO Plus");
+    expect(sent.bodyText).not.toMatch(/PACK&GO Plus|免費試用|free trial/i);
     expect(sent.bodyText).not.toContain("**");
     expect(sent.bodyText).not.toMatch(/[—–―‒]/);
   });
@@ -416,11 +412,9 @@ describe("final canonical send chokepoint — pipeline regression (Codex 16:02 P
       expect(decision.shouldAutoReply).toBe(false);
 
       // FULL canonical draft on the card — exact equality, not a prefix
-      // (Codex P2-1.1): the pipeline appends the real CTA, so expected is
-      // stripMarkdownForEmail(draft + CTA) — the same bytes a send would use.
-      const expectedCanonical = stripMarkdownForEmail(
-        c.draft + buildUpgradeCta(BASE_DECISION.draftLanguage, "https://packgoplay.com"),
-      );
+      // (Codex P2-1.1)。2026-07-26 R2:CTA 已移除,期望值即草稿本身的
+      // canonical bytes,不再有任何附加。
+      const expectedCanonical = stripMarkdownForEmail(c.draft);
       const card = capturedInserts.find((i) => i.table === agentMessages);
       expect(card).toBeTruthy();
       expect(String(card!.values.body)).toContain("建議回覆");
@@ -429,6 +423,28 @@ describe("final canonical send chokepoint — pipeline regression (Codex 16:02 P
       expect(JSON.parse(String(card!.values.context)).draftReply).toBe(expectedCanonical);
     });
   }
+
+  it("R3: 無草稿的信不得計數(呼叫條件 draftReply && senderEmail)", async () => {
+    const { recordInquiry } = await import("../../_core/inquiryCounter");
+    (recordInquiry as any).mockClear();
+    listMessagesByIdsMock.mockResolvedValue([baseMsg([])]);
+    runInquiryAgentMock.mockResolvedValue({ ...BASE_DECISION, draftReply: "" });
+
+    await runGmailPipelineForMessageIds(7);
+
+    expect(recordInquiry).not.toHaveBeenCalled();
+  });
+
+  it("R3: recordInquiry reject 時信照寄(計數 non-fatal 是行為)", async () => {
+    const { recordInquiry } = await import("../../_core/inquiryCounter");
+    (recordInquiry as any).mockRejectedValueOnce(new Error("counter down"));
+    listMessagesByIdsMock.mockResolvedValue([baseMsg([])]);
+    runInquiryAgentMock.mockResolvedValue({ ...BASE_DECISION });
+
+    await runGmailPipelineForMessageIds(7);
+
+    expect(sendReplyInThreadMock).toHaveBeenCalledTimes(1);
+  });
 
   it("attachment-free mail still auto-sends (the suspension is scoped to attachments)", async () => {
     listMessagesByIdsMock.mockResolvedValue([baseMsg([])]);

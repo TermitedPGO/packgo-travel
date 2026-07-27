@@ -146,19 +146,7 @@ export interface CheckinEmailData {
   promoCode?: string;
 }
 
-export interface TrialEndingReminderData {
-  to: string;
-  customerName: string;
-  /** "Plus" or "Concierge" — already capitalized */
-  tierLabel: string;
-  trialEndsAt: Date;
-  /** Pre-formatted "USD $29.00" string */
-  chargeAmount: string;
-  chargeInterval: "month" | "year";
-  /** Direct link to /membership where they can cancel (one-click) */
-  cancelUrl: string;
-  language?: "zh-TW" | "en";
-}
+// 2026-07-26 R2:TrialEndingReminderData 已隨試用機制整組移除(P2-2)。
 
 // ── 訂製單 (custom-orders) ──────────────────────────────────────────────
 // 三封信:報價 / 催款 / 確認書。客人面,Jeff 口語聲音:短、不官腔、不用

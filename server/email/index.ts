@@ -17,7 +17,6 @@ export { sendAbandonmentRecoveryEmail } from "./templates/abandonmentRecovery";
 export { sendVoucherIssuedEmail } from "./templates/voucherIssued";
 export { sendWinbackEmail } from "./templates/winback";
 export { sendCheckinEmail } from "./templates/checkin";
-export { sendTrialEndingReminder } from "./templates/trialEnding";
 
 // Re-export types used by callers
 export type {
@@ -31,5 +30,4 @@ export type {
   VoucherIssuedEmailData,
   WinbackEmailData,
   CheckinEmailData,
-  TrialEndingReminderData,
 } from "./templates/types";
