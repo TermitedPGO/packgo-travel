@@ -11,6 +11,7 @@
  */
 
 import { z } from "zod";
+import { toursHiddenFromPublic } from "../_core/featureFlags";
 import { publicProcedure, adminProcedure, router } from "../_core/trpc";
 import * as db from "../db";
 import { reportFunnelError } from "../_core/errorFunnel";
@@ -40,7 +41,9 @@ export const aiQuotesRouter = router({
         const params = await extractQuoteParams(input.rawRequest);
 
         // 2. Match against tour catalog
-        const matched = await matchToursForQuote(params);
+        // TG-R2(P1-2):公開報價在下架期間不引用型錄;trusted admin(後台
+        // 代客報價)旁路,與其他側門的 admin 語義一致。客製報價流程照常。
+        const matched = toursHiddenFromPublic(ctx) ? [] : await matchToursForQuote(params);
 
         // 3. Generate PDF + persist
         const quoteNumber = await generateQuoteNumber();

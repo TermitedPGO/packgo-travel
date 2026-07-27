@@ -8,6 +8,7 @@
 
 import { z } from "zod";
 import { protectedProcedure, router } from "../_core/trpc";
+import { toursHiddenFromPublic } from "../_core/featureFlags";
 import * as db from "../db";
 
 export const browsingHistoryRouter = router({
@@ -15,6 +16,7 @@ export const browsingHistoryRouter = router({
   list: protectedProcedure
     .input(z.object({ limit: z.number().optional().default(20) }).optional())
     .query(async ({ ctx, input }) => {
+      if (toursHiddenFromPublic(ctx)) return [];
       return await db.getUserBrowsingHistory(ctx.user.id, input?.limit);
     }),
 

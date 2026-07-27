@@ -17,6 +17,7 @@
 
 import { z } from "zod";
 import { publicProcedure, adminProcedure, router } from "../_core/trpc";
+import { toursHiddenFromPublic } from "../_core/featureFlags";
 import { buildRouteMap } from "../services/routeMap/builder";
 
 export const toursRouteMapRouter = router({
@@ -50,7 +51,9 @@ export const toursRouteMapRouter = router({
    */
   getRouteMap: publicProcedure
     .input(z.object({ id: z.number() }))
-    .query(async ({ input }) => {
+    .query(async ({ input, ctx }) => {
+      // TG-R1:行程下架時不建圖、不打 geocoder/LLM。
+      if (toursHiddenFromPublic(ctx)) return null;
       return await buildRouteMap({ id: input.id });
     }),
 });

@@ -12,6 +12,7 @@
  */
 
 import { getDb } from "../db";
+import { toursPublicEnabled } from "../_core/featureFlags";
 import { tours } from "../../drizzle/schema";
 import { and, eq, like, or, gte, lte, desc } from "drizzle-orm";
 
@@ -90,7 +91,15 @@ function detectIntent(message: string, history: { role: string; content: string 
  */
 export async function enrichChatContext(
   message: string,
-  history: { role: string; content: string }[] = []
+  history: { role: string; content: string }[] = [],
+  opts: {
+    /**
+     * TG-R2(P1-2)明文例外:公開 SSE 顧問一律 fail-closed(不得傳 true);
+     * 只有 admin-only 流程(WeChat 後台草稿)可旁路行程下架總閘。
+     * 由 wechatAssistService 傳入;測試鎖在 aiChatContextService.takedown.test.ts。
+     */
+    trustedAdminBypassTourTakedown?: boolean;
+  } = {}
 ): Promise<ChatEnrichment> {
   const intent = detectIntent(message, history);
 
@@ -113,7 +122,10 @@ export async function enrichChatContext(
   const blocks: string[] = [];
 
   // 1) Inject real tour data when destination intent is detected
-  if (intent.destinationCountries.length > 0) {
+  // TG-R1(P0-1):行程下架時,AI 顧問不得再把團名、價格、連結注入 prompt。
+  // 這是公開 SSE 路徑,無 admin 概念,直接看旗標。
+  const tourCatalogAllowed = toursPublicEnabled() || opts.trustedAdminBypassTourTakedown === true;
+  if (tourCatalogAllowed && intent.destinationCountries.length > 0) {
     const db = await getDb();
     if (db) {
       try {

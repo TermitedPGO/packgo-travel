@@ -32,6 +32,7 @@
 import { z } from "zod";
 import { TRPCError } from "@trpc/server";
 import { protectedProcedure, adminProcedure, router } from "../_core/trpc";
+import { toursHiddenFromPublic } from "../_core/featureFlags";
 import type { OrderPacket } from "@shared/orderPacket";
 import { consentFields } from "@shared/consent";
 import * as db from "../db";
@@ -103,6 +104,11 @@ export const bookingsRouter = router({
         })
       )
       .mutation(async ({ ctx, input }) => {
+        // TG-R1(P0-2):行程下架期間停止新接單(歷史訂單照常可查,
+        // 履約資料不下架)。admin 仍可手動建單。Jeff 2026-07-26 裁定。
+        if (toursHiddenFromPublic(ctx)) {
+          throw new TRPCError({ code: "PRECONDITION_FAILED", message: "行程整備中,暫停線上訂位,請聯絡我們安排" });
+        }
         const { audit } = await import("../_core/auditLog");
 
         // Rate limiting: 10 bookings per hour per user

@@ -67,7 +67,10 @@ export interface DraftReplyResult {
 
 export async function draftReply(input: DraftReplyInput): Promise<DraftReplyResult> {
   // 1. Enrich with live tour catalog if applicable
-  const enrichment = await enrichChatContext(input.inboundText).catch(() => null);
+  // TG-R2:WeChat 草稿是 admin-only 後台流程,行程下架期間仍需型錄輔助。
+  const enrichment = await enrichChatContext(input.inboundText, [], {
+    trustedAdminBypassTourTakedown: true,
+  }).catch(() => null);
   const contextBlock = enrichment?.systemPromptAddition || "";
 
   // 2. LLM call (Haiku — cheap, fast, plenty for this use case)

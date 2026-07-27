@@ -20,6 +20,7 @@
 
 import { z } from "zod";
 import { publicProcedure, adminProcedure, router } from "../_core/trpc";
+import { toursHiddenFromPublic } from "../_core/featureFlags";
 import * as db from "../db";
 import {
   translateText,
@@ -43,7 +44,9 @@ export const translationRouter = router({
         targetLanguage: z.enum(['zh-TW', 'en']),
         sourceLanguage: z.enum(['zh-TW', 'en']).optional().default('zh-TW'),
       }))
-      .mutation(async ({ input }) => {
+      .mutation(async ({ input, ctx }) => {
+        // TG-R1:下架期間不對匿名開放 LLM 翻譯(原文原樣返還,零成本)。
+        if (toursHiddenFromPublic(ctx)) return { translated: input.text };
         const translated = await translateText(
           input.text,
           input.targetLanguage,
@@ -59,7 +62,8 @@ export const translationRouter = router({
         targetLanguage: z.enum(['zh-TW', 'en']),
         sourceLanguage: z.enum(['zh-TW', 'en']).optional().default('zh-TW'),
       }))
-      .mutation(async ({ input }) => {
+      .mutation(async ({ input, ctx }) => {
+        if (toursHiddenFromPublic(ctx)) return { translated: input.texts };
         const translated = await translateBatch(
           input.texts,
           input.targetLanguage,
@@ -123,7 +127,9 @@ export const translationRouter = router({
         tourId: z.number(),
         targetLanguage: z.enum(['zh-TW', 'en']),
       }))
-      .query(async ({ input }) => {
+      .query(async ({ input, ctx }) => {
+        // TG-R1:下架時不回行程翻譯內容,也不匿名排翻譯 job。
+        if (toursHiddenFromPublic(ctx)) return {};
         const translations = await getTourTranslations(
           input.tourId,
           input.targetLanguage as Language
@@ -148,7 +154,9 @@ export const translationRouter = router({
         tourIds: z.array(z.number()),
         targetLanguage: z.enum(['zh-TW', 'en']),
       }))
-      .query(async ({ input }) => {
+      .query(async ({ input, ctx }) => {
+        // TG-R2(P0-1):batch 讀口同受總閘;OFF 且非 admin 回空。
+        if (toursHiddenFromPublic(ctx)) return {};
         const result = await getBatchTourTranslations(
           input.tourIds,
           input.targetLanguage as Language
@@ -161,7 +169,8 @@ export const translationRouter = router({
       .input(z.object({
         tourId: z.number(),
       }))
-      .query(async ({ input }) => {
+      .query(async ({ input, ctx }) => {
+        if (toursHiddenFromPublic(ctx)) return {};
         const translations = await getAllTourTranslations(input.tourId);
         return translations;
       }),

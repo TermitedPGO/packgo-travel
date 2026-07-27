@@ -39,8 +39,17 @@ import type {
   NormalizedTourInfo,
 } from "../services/supplierSync/types";
 import { createChildLogger } from "../_core/logger";
+import { toursHiddenFromPublic } from "../_core/featureFlags";
 
 const log = createChildLogger({ module: "toursRead" });
+
+
+// 2026-07-26 Jeff 裁定全行程下架(供應商資料架構未定)。對公眾隱藏,
+// admin 不受影響(後台要整備資料)。語義與測試見 toursRead.takedown.test.ts。
+const hiddenFromPublic = toursHiddenFromPublic;
+
+const EMPTY_PAGINATION = (page: number, pageSize: number) =>
+  ({ page, pageSize, total: 0, totalPages: 0, hasMore: false });
 
 export const toursReadRouter = router({
   // Get all tours (public)
@@ -59,14 +68,18 @@ export const toursReadRouter = router({
         })
         .optional()
     )
-    .query(async ({ input }) => {
+    .query(async ({ input, ctx }) => {
+      if (hiddenFromPublic(ctx)) return [];
       return await db.getAllTours(input);
     }),
 
   // Get single tour by ID (public)
   getById: publicProcedure
     .input(z.object({ id: z.number() }))
-    .query(async ({ input }) => {
+    .query(async ({ input, ctx }) => {
+      if (hiddenFromPublic(ctx)) {
+        throw new TRPCError({ code: "NOT_FOUND", message: "行程整備中" });
+      }
       const tour = await db.getTourById(input.id);
       if (!tour) {
         throw new TRPCError({
@@ -78,12 +91,22 @@ export const toursReadRouter = router({
     }),
 
   // Get filter options for smart filtering (public)
-  getFilterOptions: publicProcedure.query(async () => {
+  getFilterOptions: publicProcedure.query(async ({ ctx }) => {
+    if (hiddenFromPublic(ctx)) {
+      return {
+        destinations: [], tags: [],
+        smartTags: { duration: [], price: [], transport: [], feature: [] },
+        // TG-R1(P2-2):沿用空 DB fallback 區間,免得 /search slider 退化成 0..0。
+        durationRange: { min: 1, max: 30 },
+        priceRange: { min: 0, max: 500000 },
+      };
+    }
     return await db.getFilterOptions();
   }),
 
   // Get distinct departure cities from active tours (for search autocomplete)
-  getDepartureCities: publicProcedure.query(async () => {
+  getDepartureCities: publicProcedure.query(async ({ ctx }) => {
+    if (hiddenFromPublic(ctx)) return [];
     return await db.getDepartureCities();
   }),
 
@@ -110,7 +133,10 @@ export const toursReadRouter = router({
         pageSize: z.number().int().min(1).max(100).default(12),
       })
     )
-    .query(async ({ input }) => {
+    .query(async ({ input, ctx }) => {
+      if (hiddenFromPublic(ctx)) {
+        return { tours: [], pagination: EMPTY_PAGINATION(input.page, input.pageSize) };
+      }
       const { page, pageSize, ...filters } = input;
       const offset = (page - 1) * pageSize;
 
@@ -172,7 +198,10 @@ export const toursReadRouter = router({
         language: z.enum(["zh-TW", "en"]).default("zh-TW"),
       }),
     )
-    .query(async ({ input }) => {
+    .query(async ({ input, ctx }) => {
+      if (hiddenFromPublic(ctx)) {
+        return { tours: [], pagination: EMPTY_PAGINATION(input.page, input.pageSize) };
+      }
       const { page, pageSize, language, ...filters } = input;
       const offset = (page - 1) * pageSize;
 
@@ -244,7 +273,9 @@ export const toursReadRouter = router({
    */
   suggest: publicProcedure
     .input(z.object({ query: z.string().max(50).default("") }))
-    .query(async ({ input }) => {
+    .query(async ({ input, ctx }) => {
+      // TG-R1(P1-1):正常分支回 { suggestions },關閘分支形狀必須一致。
+      if (hiddenFromPublic(ctx)) return { suggestions: [] };
       const q = input.query.trim().toLowerCase();
       const allTours = await db.getAllTours();
       const active = allTours.filter((t) => t.status === "active");
@@ -362,7 +393,10 @@ export const toursReadRouter = router({
   // Generate PDF for tour (public)
   generatePdf: publicProcedure
     .input(z.object({ id: z.number() }))
-    .mutation(async ({ input }) => {
+    .mutation(async ({ input, ctx }) => {
+      if (hiddenFromPublic(ctx)) {
+        throw new TRPCError({ code: "PRECONDITION_FAILED", message: "行程整備中,暫停提供行程 PDF" });
+      }
       log.info({ tourId: input.id }, "Starting PDF generation");
 
       // Get tour data
@@ -441,7 +475,8 @@ export const toursReadRouter = router({
       tourId: z.number(),
       limit: z.number().optional().default(4),
     }))
-    .query(async ({ input }) => {
+    .query(async ({ input, ctx }) => {
+      if (hiddenFromPublic(ctx)) return [];
       const allTours = await db.getAllTours({ status: 'active' });
       const currentTour = (allTours as any[]).find((t: any) => t.id === input.tourId);
       if (!currentTour) return [];
@@ -470,7 +505,8 @@ export const toursReadRouter = router({
       limit: z.number().optional().default(6),
       userId: z.number().optional(),
     }))
-    .query(async ({ input }) => {
+    .query(async ({ input, ctx }) => {
+      if (hiddenFromPublic(ctx)) return [];
       const allTours = await db.getAllTours({ status: 'active', featured: true });
       if (!input.userId) return (allTours as any[]).slice(0, input.limit);
       const history = await db.getUserBrowsingHistory(input.userId, 10);
@@ -512,7 +548,8 @@ export const toursReadRouter = router({
    */
   getSupplierDetail: publicProcedure
     .input(z.object({ tourId: z.number().int().positive() }))
-    .query(async ({ input }) => {
+    .query(async ({ input, ctx }) => {
+      if (hiddenFromPublic(ctx)) return null;
       const drizzleDb = await getDb();
       if (!drizzleDb) return null;
 
