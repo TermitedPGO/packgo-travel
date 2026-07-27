@@ -155,6 +155,34 @@ export const tourInstantCheckoutEnabled = (): boolean =>
   isTrue(process.env.TOUR_INSTANT_CHECKOUT_ENABLED);
 
 /**
+ * TOURS_PUBLIC_ENABLED — 對客行程面總閘(2026-07-26,Jeff 裁定)。
+ *
+ * Jeff 原話:「所有行程也都先下架,因為目前我們得討論如何架構對的方向
+ * 取得供應商的 API 照片 行程 等所有訊息」。現有行程資料的來源與授權
+ * (供應商 API、照片、行程內容)未定案,先不對客展示。
+ *
+ * OFF(預設)= 公眾看不到任何行程:toursRead 全部 public 讀取回空形狀
+ * 且不打 DB,sitemap 不產行程網址。**admin 角色不受影響**,後台照常
+ * 管理與整備。簽證、客製、包團、聯絡、會員完全不經此旗標。
+ *
+ * ON = 恢復對客展示。開啟前置:供應商資料架構定案並由 Jeff 明示裁定。
+ *
+ * Env: `TOURS_PUBLIC_ENABLED=true`
+ */
+export const toursPublicEnabled = (): boolean =>
+  isTrue(process.env.TOURS_PUBLIC_ENABLED);
+
+/**
+ * TG-R1:共用 guard。第 1 回合終驗證實只閘 toursRead 一個 router 不構成
+ * 「全行程下架」:departures、translation、routeMap、affiliate、reviews、
+ * favorites、browsingHistory、bookings.create、AI 顧問與 AI 報價都會漏。
+ * 所有行程資料的對客讀取與接單,一律經本 guard;admin 旁路一致。
+ */
+export const toursHiddenFromPublic = (
+  ctx?: { user?: { role?: string } | null } | null,
+): boolean => !toursPublicEnabled() && ctx?.user?.role !== "admin";
+
+/**
  * STOREFRONT_MODE — same-image split-role flag (feature: storefront-split,
  * Phase 0). When SET, this process runs as the customer-facing storefront:
  * it serves the SPA + bot-prerender + the public tRPC surface, but starts

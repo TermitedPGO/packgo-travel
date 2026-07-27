@@ -8,6 +8,7 @@
 
 import { z } from "zod";
 import { protectedProcedure, router } from "../_core/trpc";
+import { toursHiddenFromPublic } from "../_core/featureFlags";
 import * as db from "../db";
 
 export const favoritesRouter = router({
@@ -18,6 +19,8 @@ export const favoritesRouter = router({
 
   // Get user's favorite tours with details
   list: protectedProcedure.query(async ({ ctx }) => {
+    // TG-R1:收藏清單會 hydrate 完整 Tour,下架期間回空(收藏 ID 保留不刪)。
+    if (toursHiddenFromPublic(ctx)) return [];
     return await db.getUserFavorites(ctx.user.id);
   }),
 

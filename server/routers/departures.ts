@@ -25,6 +25,7 @@
 import { z } from "zod";
 import { TRPCError } from "@trpc/server";
 import { publicProcedure, adminProcedure, router } from "../_core/trpc";
+import { toursHiddenFromPublic } from "../_core/featureFlags";
 import { reportFunnelError } from "../_core/errorFunnel";
 import * as db from "../db";
 
@@ -38,7 +39,8 @@ export const departuresRouter = router({
     // Get next upcoming departure for a single tour
     getNext: publicProcedure
       .input(z.object({ tourId: z.number() }))
-      .query(async ({ input }) => {
+      .query(async ({ input, ctx }) => {
+        if (toursHiddenFromPublic(ctx)) return null;
         const allDepartures = await db.getTourDepartures(input.tourId);
         const now = new Date();
         const upcoming = (allDepartures as any[])
@@ -50,7 +52,8 @@ export const departuresRouter = router({
     // Returns lean fields only — id, date, status, adultPrice — to keep payload small
     getUpcoming: publicProcedure
       .input(z.object({ tourId: z.number(), limit: z.number().min(1).max(10).default(3) }))
-      .query(async ({ input }) => {
+      .query(async ({ input, ctx }) => {
+        if (toursHiddenFromPublic(ctx)) return [];
         const allDepartures = await db.getTourDepartures(input.tourId);
         const now = new Date();
         const upcoming = (allDepartures as any[])
@@ -73,7 +76,8 @@ export const departuresRouter = router({
     // Get next upcoming departure for multiple tours (batch)
     getNextBatch: publicProcedure
       .input(z.object({ tourIds: z.array(z.number()) }))
-      .query(async ({ input }) => {
+      .query(async ({ input, ctx }) => {
+        if (toursHiddenFromPublic(ctx)) return {};
         const result: Record<number, any> = {};
         const now = new Date();
         await Promise.all(input.tourIds.map(async (tourId) => {
@@ -88,21 +92,24 @@ export const departuresRouter = router({
     // Get all departures for a tour
     list: publicProcedure
       .input(z.object({ tourId: z.number() }))
-      .query(async ({ input }) => {
+      .query(async ({ input, ctx }) => {
+        if (toursHiddenFromPublic(ctx)) return [];
         return await db.getTourDepartures(input.tourId);
       }),
 
     // Alias for list (for backward compatibility)
     listByTour: publicProcedure
       .input(z.object({ tourId: z.number() }))
-      .query(async ({ input }) => {
+      .query(async ({ input, ctx }) => {
+        if (toursHiddenFromPublic(ctx)) return [];
         return await db.getTourDepartures(input.tourId);
       }),
 
     // Get single departure
     getById: publicProcedure
       .input(z.object({ id: z.number() }))
-      .query(async ({ input }) => {
+      .query(async ({ input, ctx }) => {
+        if (toursHiddenFromPublic(ctx)) return null;
         return await db.getDepartureById(input.id);
       }),
 

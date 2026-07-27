@@ -17,6 +17,7 @@ import { appRouter } from "../routers";
 import { createContext } from "./context";
 import { serveStatic, setupVite } from "./vite";
 import { prerenderMiddleware } from "./prerenderMiddleware";
+import { toursPublicEnabled } from "./featureFlags";
 import { buildAllowedOrigins, isOriginAllowed } from "./corsOrigins";
 import { handleStripeWebhook } from "./stripeWebhook";
 import { avatarUploadRouter } from "../avatarUpload";
@@ -1998,7 +1999,8 @@ async function startServer() {
       // canonical /china-visa (the former is a JS redirect).
       const staticPages = [
         { url: '/', priority: '1.0', changefreq: 'daily' },
-        { url: '/tours', priority: '0.9', changefreq: 'daily' },
+        // 2026-07-26 Jeff 裁定全行程下架:旗標關時 /tours 與行程頁不進 sitemap
+        ...(toursPublicEnabled() ? [{ url: '/tours', priority: '0.9', changefreq: 'daily' }] : []),
         { url: '/china-visa', priority: '0.9', changefreq: 'weekly' },
         { url: '/custom-tours', priority: '0.8', changefreq: 'weekly' },
         { url: '/custom-tour-request', priority: '0.8', changefreq: 'weekly' },
@@ -2016,7 +2018,8 @@ async function startServer() {
       ];
 
       // Include both active and soldout tours (soldout still has SEO value; inactive/draft excluded)
-      const tourUrls = tours
+      // 2026-07-26:全行程下架旗標關時,行程網址整段不產(toursRead 同步回 404)。
+      const tourUrls = (toursPublicEnabled() ? tours : [])
         .filter((t: any) => t.status === 'active' || t.status === 'soldout')
         .map((t: any) => {
           const lastmod = t.updatedAt ? new Date(t.updatedAt).toISOString().split('T')[0] : now;

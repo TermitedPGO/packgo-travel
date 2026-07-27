@@ -19,6 +19,7 @@
 
 import { z } from "zod";
 import { publicProcedure, adminProcedure, router } from "../_core/trpc";
+import { toursHiddenFromPublic } from "../_core/featureFlags";
 import * as db from "../db";
 
 export const affiliateRouter = router({
@@ -78,7 +79,8 @@ export const affiliateRouter = router({
 
     getPriceComparison: publicProcedure
       .input(z.object({ tourId: z.number() }))
-      .query(async ({ input }) => {
+      .query(async ({ input, ctx }) => {
+        if (toursHiddenFromPublic(ctx)) return null;
         return db.getTourPriceComparison(input.tourId);
       }),
   });

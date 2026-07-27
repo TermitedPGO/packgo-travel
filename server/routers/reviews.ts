@@ -19,6 +19,7 @@
 import { z } from "zod";
 import { TRPCError } from "@trpc/server";
 import { publicProcedure, protectedProcedure, adminProcedure, router } from "../_core/trpc";
+import { toursHiddenFromPublic } from "../_core/featureFlags";
 import * as db from "../db";
 
 export const reviewsRouter = router({
@@ -36,7 +37,9 @@ export const reviewsRouter = router({
           })
           .optional()
       )
-      .query(async ({ input }) => {
+      .query(async ({ input, ctx }) => {
+        // TG-R1:評價帶團名與行程連結,下架期間一併不出。
+        if (toursHiddenFromPublic(ctx)) return [];
         const drizzleDb = await db.getDb();
         if (!drizzleDb) return [];
         const { tourReviews, users: usersTable, tours: toursTable } = await import(

@@ -19,6 +19,12 @@
  *   - create: abandonment-recovery scheduling failure (~line 418)
  *   - getOrderPacket: supplier order-packet departure lookup failure (~line 781)
  */
+// TG-R1:全行程下架總閘上線後,本檔測的是接單流程本身(旗標開啟情境)。
+// 總閘的擋單行為由 toursPublicTakedown.test.ts 鎖。vi.stubEnv 結束自動還原。
+import { vi as __vi, beforeAll as __beforeAll, afterAll as __afterAll } from "vitest";
+__beforeAll(() => { __vi.stubEnv("TOURS_PUBLIC_ENABLED", "true"); });
+__afterAll(() => { __vi.unstubAllEnvs(); });
+
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
 // Mock collaborators BEFORE importing the router so the router picks up the
