@@ -1227,6 +1227,11 @@ describe("R13 adminAuditLog 直接寫入者 guard(TypeChecker+lexical 求值+SQL
     }
     /** R17-1:canonical file set 單一來源(呼叫次數由 counter 釘死=每 flow 一次)。
      *  磁碟遞迴與 overlay 過濾共用 isCanonicalPath;結果去重。 */
+    /** R21-1(Codex 第3回合 P1-1):Program 建立次數量在「真正的建立接縫」上,
+     *  不掛在任何呼叫端。每次 ts.createProgram 前記一筆 { kind, rootCount },
+     *  呼叫端無法繞過:bounded 若退化成用 baseline canonical、或多建一次全庫
+     *  Program,這裡都會多出一筆大 rootCount 的紀錄 → exact-one 斷言轉紅。 */
+    const programBuilds: Array<{ kind: "real" | "virtual"; rootCount: number }> = [];
     let walkCallCount = 0;
     function walkCanonicalFiles(root: string, overlayPaths: string[] = []): string[] {
       walkCallCount++;
@@ -1274,6 +1279,7 @@ describe("R13 adminAuditLog 直接寫入者 guard(TypeChecker+lexical 求值+SQL
           fileExists: (name) => files[name] !== undefined,
           readFile: (name) => files[name],
         };
+        programBuilds.push({ kind: "virtual", rootCount: roots.length });
         return { program: ts.createProgram(roots, options, host), schemaPath, rootFileNames: roots, canonicalRef: undefined as string[] | undefined };
       }
       const root = opts.realRoot;
@@ -1298,6 +1304,7 @@ describe("R13 adminAuditLog 直接寫入者 guard(TypeChecker+lexical 求值+SQL
         fileExists: (name) => overlay[name] !== undefined || baseHost.fileExists(name),
         readFile: (name) => (overlay[name] !== undefined ? overlay[name] : baseHost.readFile(name)),
       };
+      programBuilds.push({ kind: "real", rootCount: roots.length });
       return {
         program: ts.createProgram(roots, { ...parsed.options, noEmit: true, skipLibCheck: true, allowJs: true, checkJs: false }, host),
         schemaPath,
@@ -1311,6 +1318,7 @@ describe("R13 adminAuditLog 直接寫入者 guard(TypeChecker+lexical 求值+SQL
       sqlHitsAdminAuditLog, walkCanonicalFiles, isCanonicalPath,
       getWalkCallCount: () => walkCallCount,
       getRawMemoSize: () => rawResultMemo.size,
+      getProgramBuilds: () => programBuilds.map((b) => ({ ...b })),
     };
   }
 
@@ -1324,13 +1332,12 @@ describe("R13 adminAuditLog 直接寫入者 guard(TypeChecker+lexical 求值+SQL
   });
 
   it("R15-1 canonical completeness:六副檔名 oracle 與 roots exact set equality;每檔 getSourceFile 存在(副檔名縮水突變必紅)", async () => {
-    const { buildGuardProgram, walkCanonicalFiles } = await makeCheckerScanner();
     const { readdirSync, statSync } = await import("node:fs");
     const { join } = await import("node:path");
     const root = process.cwd();
-    // R17-1:呼叫端做唯一一次 discovery,builder 不內部 walk
-    const canonicalOnce = walkCanonicalFiles(root);
-    const { program, schemaPath, rootFileNames } = buildGuardProgram({ realRoot: root, canonical: canonicalOnce });
+    // R20-1:改讀那唯一一次 baseline 的現場結果(R17-1 的「呼叫端唯一一次
+    // discovery、builder 不內部 walk」由 baseline 執行並由 R18-2 斷言)
+    const { schemaPath, rootFileNames, loadedSourceFiles } = await getBaseline();
     // 獨立 oracle:完整六副檔名 canonical walk(與 production 同排除規則)
     const SKIP = new Set(["node_modules", "dist", "build", "coverage", ".git", ".cache"]);
     const oracle: string[] = [];
@@ -1350,7 +1357,7 @@ describe("R13 adminAuditLog 直接寫入者 guard(TypeChecker+lexical 求值+SQL
     expect(new Set(rootFileNames)).toEqual(new Set([schemaPath, ...oracle]));
     // 每檔必須真的載入為 SourceFile(無 rootFileNames.includes fallback)
     for (const f of oracle) {
-      expect(program.getSourceFile(f), `SourceFile not loaded: ${f}`).toBeTruthy();
+      expect(loadedSourceFiles.has(f), `SourceFile not loaded: ${f}`).toBe(true);
     }
   }, 240000);
 
@@ -1475,29 +1482,67 @@ describe("R13 adminAuditLog 直接寫入者 guard(TypeChecker+lexical 求值+SQL
     if (!scannerMemo) scannerMemo = await makeCheckerScanner();
     return scannerMemo;
   }
-  // R18-2:unionMemo 已刪除 —— 每次呼叫都是 uncached flow(walkCalls 不可能
-  // 由快取充數);唯一快取是 per-content 的 rawResultMemo(純函式,differential
-  // 測試證明等價)。
-  async function computeWriterUnionFull(overlay: Record<string, string> = {}) {
+  // R20-1(Codex 第2回合裁定):full-repo Program 每個 vitest process 只建一次。
+  //
+  // 背景:單一 full-repo Program(1,039 roots / 6,001 SourceFile)光是 createProgram
+  // 完成就佔約 2,100 MiB,已高於 Node 預設 old-space 上限,故 heap override 是必要
+  // 條件而非可省;但原本每個 overlay 案例各重建一次(約 12 次)只是把高水位拉長、
+  // 把 swap churn 放大,沒有任何額外證明力。改為:
+  //   baseline  = 唯一一次全庫掃描(現場產生,不跨 process、不落地)
+  //   overlay 案 = bounded Program(roots 只有 schema 與注入檔)走同一條接縫
+  //   當次結果  = baseline union ∪ 當次 bounded hits
+  // 六項防假綠條件見下方各處註解與 R18-2 的斷言。
+  //
+  // baseline 只保留純結果(union / paths / roots / 計數 / 已載入檔名布林集),
+  // Program 物件在 computeBaseline 回傳時即離開作用域,不被任何人持有。
+  type Baseline = {
+    union: string[];
+    canonical: string[];
+    rawScannedPaths: string[];
+    rootFileNames: string[];
+    builderCanonicalRef: string[] | undefined;
+    schemaPath: string;
+    walkCalls: number;
+    loadedSourceFiles: Set<string>;
+  };
+  let baselineMemo: Promise<Baseline> | null = null;
+  function getBaseline(): Promise<Baseline> {
+    if (!baselineMemo) baselineMemo = computeBaseline();
+    return baselineMemo;
+  }
+  /** R21-1:exact-one 證明改讀「建立接縫」的紀錄,不再用呼叫端手動計數。
+   *  bounded 案例最多注入 4 檔(+schema)= 5 roots,baseline 是 1,039+1,
+   *  門檻 10 把兩者乾淨分開;任何把 bounded 換成全庫 roots、或多建一次全庫
+   *  Program 的退化,都會讓 full 那組多出一筆 → 轉紅。 */
+  const FULL_REPO_ROOT_THRESHOLD = 10;
+  async function realBuilds() {
+    const { getProgramBuilds } = await getScanner();
+    return getProgramBuilds().filter((b) => b.kind === "real");
+  }
+  async function fullRepoBuilds() {
+    return (await realBuilds()).filter((b) => b.rootCount > FULL_REPO_ROOT_THRESHOLD);
+  }
+  async function computeBaseline(): Promise<Baseline> {
     const scanner = await getScanner();
     const { findDrizzleWriters, buildGuardProgram, isRawSqlWriterSource, walkCanonicalFiles, getWalkCallCount } = scanner;
     const { readFileSync } = await import("node:fs");
     const { relative } = await import("node:path");
     const root = process.cwd();
     const before = getWalkCallCount();
-    const canonical = walkCanonicalFiles(root, Object.keys(overlay)); // 唯一一次 discovery
+    const canonical = walkCanonicalFiles(root); // 唯一一次 discovery
     const rawHits: string[] = [];
     const rawScannedPaths: string[] = [];
     let yieldCounter = 0;
     for (const p of canonical) {
       rawScannedPaths.push(p);
-      const src = overlay[p] !== undefined ? overlay[p] : readFileSync(p, "utf8");
-      if (isRawSqlWriterSource(src, "/scan/" + p.split("/").pop())) rawHits.push(relative(root, p));
+      if (isRawSqlWriterSource(readFileSync(p, "utf8"), "/scan/" + p.split("/").pop())) rawHits.push(relative(root, p));
       // 長同步掃描會餓死 vitest worker IPC 心跳(onTaskUpdate timeout)→ 定期讓出
       if (++yieldCounter % 25 === 0) await new Promise((r) => setImmediate(r));
     }
-    const built = buildGuardProgram({ realRoot: root, canonical, overlay });
+    const built = buildGuardProgram({ realRoot: root, canonical });
     const drizzleHits = findDrizzleWriters(built.program, built.schemaPath).map((p) => relative(root, p));
+    // 布林證明:哪些檔真的被載入為 SourceFile(R15-1 用;不保留 Program 本體)
+    const loadedSourceFiles = new Set<string>(built.program.getSourceFiles().map((sf) => sf.fileName));
     return {
       union: [...new Set([...drizzleHits, ...rawHits])].sort(),
       canonical,
@@ -1506,18 +1551,82 @@ describe("R13 adminAuditLog 直接寫入者 guard(TypeChecker+lexical 求值+SQL
       builderCanonicalRef: built.canonicalRef,
       schemaPath: built.schemaPath,
       walkCalls: getWalkCallCount() - before,
+      loadedSourceFiles,
     };
   }
-  async function computeWriterUnion(overlay: Record<string, string> = {}) {
-    return (await computeWriterUnionFull(overlay)).union;
+  /** overlay 案例:bounded Program(roots 只有 schema 與注入檔),走與 baseline
+   *  完全相同的 isCanonicalPath / selectRoots / buildGuardProgram / findDrizzleWriters /
+   *  isRawSqlWriterSource 接縫。回傳當次 bounded 命中(未與 baseline 合併)。 */
+  async function computeBoundedHits(overlay: Record<string, string>) {
+    const scanner = await getScanner();
+    const { findDrizzleWriters, buildGuardProgram, isRawSqlWriterSource, isCanonicalPath } = scanner;
+    const { relative } = await import("node:path");
+    const root = process.cwd();
+    const base = await getBaseline();
+    // 條件一:overlay 只允許 additive(磁碟不存在的新路徑)。碰撞 baseline canonical
+    // 代表這是 replacement/deletion 語意,單調 union 模擬不了 → 立即 throw,不得靜默。
+    const collide = Object.keys(overlay).filter((p) => base.canonical.includes(p));
+    if (collide.length > 0) throw new Error(`overlay path collides with baseline canonical (replacement not modelled): ${collide.join(", ")}`);
+    const overlayCanonical = Object.keys(overlay).filter((p) => isCanonicalPath(root, p));
+    const rawHits: string[] = [];
+    for (const p of overlayCanonical) {
+      if (isRawSqlWriterSource(overlay[p], "/scan/" + p.split("/").pop())) rawHits.push(relative(root, p));
+    }
+    let drizzleHits: string[] = [];
+    if (overlayCanonical.length > 0) {
+      const built = buildGuardProgram({ realRoot: root, canonical: overlayCanonical, overlay });
+      // 只認 overlay 檔:bounded Program 會順著 schema 匯入拉進真實庫檔,那些檔的
+      // 判定歸 baseline 負責,不在此重複計。
+      drizzleHits = findDrizzleWriters(built.program, built.schemaPath)
+        .filter((f) => overlayCanonical.includes(f))
+        .map((p) => relative(root, p));
+    }
+    return { rawHits, drizzleHits, hits: [...new Set([...rawHits, ...drizzleHits])].sort() };
+  }
+  /** 條件三:各案例先斷言當次 bounded 命中,再用同一份 bounded 結果併 baseline
+   *  求 union(不重跑,避免同一案例建兩次 bounded Program)。 */
+  async function unionWith(bounded: { hits: string[] }) {
+    const base = await getBaseline();
+    return [...new Set([...base.union, ...bounded.hits])].sort();
   }
 
   it("R18-2 單路徑防退(uncached):walker 恰一次;raw 實掃 path set === canonical exact set;builder 收到同一陣列參照", async () => {
-    const r = await computeWriterUnionFull(); // unionMemo 已刪,必為 uncached flow
+    // R20-1:讀的是 baseline 那一次真實執行當場記錄的 delta 與參照,不是常數
+    const r = await getBaseline();
     expect(r.walkCalls).toBe(1);
     expect(r.rawScannedPaths).toEqual(r.canonical); // raw 半縮副檔名 → 不等 → 紅
     expect(new Set(r.rootFileNames)).toEqual(new Set([r.schemaPath, ...r.canonical]));
     expect(Object.is(r.builderCanonicalRef, r.canonical)).toBe(true); // 同一參照
+    // R21-1:full-repo Program 恰建一次,且那一次的 roots 恰為 canonical ∪ {schema}。
+    // 讀的是建立接縫的紀錄,呼叫端繞不過。
+    const fullAfterBaseline = await fullRepoBuilds();
+    expect(fullAfterBaseline).toHaveLength(1);
+    expect(fullAfterBaseline[0].rootCount).toBe(new Set([r.schemaPath, ...r.canonical]).size);
+    // 內容變更反例(同一新增路徑 writer → non-writer):若 bounded 半邊吃到舊結果
+    // 代打,第二次仍會命中 → 紅。證明結果不會跨內容充數。
+    // raw 半邊(SQL tokenizer 路徑):
+    const root = process.cwd();
+    const flipPath = root + "/scripts/__r20_flip__.mjs";
+    const writerSrc = 'const conn = { execute: async () => {} };\nawait conn.execute("INSERT INTO adminAuditLog (a) VALUES (1)");\n';
+    const benignSrc = 'const conn = { execute: async () => {} };\nawait conn.execute("SELECT * FROM adminAuditLog");\n';
+    expect((await computeBoundedHits({ [flipPath]: writerSrc })).rawHits).toContain("scripts/__r20_flip__.mjs");
+    expect((await computeBoundedHits({ [flipPath]: benignSrc })).rawHits).not.toContain("scripts/__r20_flip__.mjs");
+    // R21-2:TypeChecker 半邊同一路徑的 writer → non-writer(Drizzle only,
+    // 內容不含任何 execute/query,raw 半邊全程不參與)。bounded 若對 Drizzle
+    // 結果加上以路徑為 key 的快取,第二次仍會命中 → 紅。
+    const tcFlipPath = root + "/scripts/__r21_flip__.ts";
+    const tcWriter =
+      'import { adminAuditLog } from "../drizzle/schema";\ndeclare const db: { insert: (t: unknown) => { values: (v: unknown) => void } };\ndb.insert(adminAuditLog).values({});\n';
+    const tcBenign =
+      'import { otherTable } from "../drizzle/schema";\ndeclare const db: { insert: (t: unknown) => { values: (v: unknown) => void } };\ndb.insert(otherTable).values({});\n';
+    expect(/execute|query/i.test(tcWriter + tcBenign)).toBe(false); // 前提自檢:raw 半邊不可能代打
+    expect((await computeBoundedHits({ [tcFlipPath]: tcWriter })).drizzleHits).toContain("scripts/__r21_flip__.ts");
+    expect((await computeBoundedHits({ [tcFlipPath]: tcBenign })).drizzleHits).not.toContain("scripts/__r21_flip__.ts");
+    // 條件一:overlay 碰撞 baseline canonical 一律 throw(不得用單調 union 模擬取代)
+    await expect(computeBoundedHits({ [r.canonical[0]]: writerSrc })).rejects.toThrow(/collides with baseline canonical/);
+    // bounded 半邊不得偷建 full-repo Program:上面跑了四次 bounded,full 仍須是 1
+    expect(await fullRepoBuilds()).toHaveLength(1);
+    expect((await realBuilds()).filter((b) => b.rootCount <= FULL_REPO_ROOT_THRESHOLD).length).toBeGreaterThanOrEqual(4);
   }, 240000);
 
   it("R17-3 overlay 規則同源:SKIP/hidden/test/非法副檔名四錯收案全拒;合法 .mjs 綠案通過", async () => {
@@ -1538,9 +1647,12 @@ describe("R13 adminAuditLog 直接寫入者 guard(TypeChecker+lexical 求值+SQL
     const writer = 'const conn = { execute: async () => {} };\nawait conn.execute("INSERT INTO adminAuditLog (a) VALUES (1)");\n';
     const redOverlay: Record<string, string> = {};
     for (const p of RED) redOverlay[p] = writer;
-    expect(await computeWriterUnion(redOverlay)).toEqual(["scripts/grant-admin.mjs", "server/_core/auditLog.ts"].sort());
-    const green = await computeWriterUnion({ [root + "/scripts/__ok__.mjs"]: writer });
-    expect(green).toContain("scripts/__ok__.mjs");
+    const redBounded = await computeBoundedHits(redOverlay);
+    expect(redBounded.hits).toEqual([]); // 條件三:bounded 半邊本身就不得收
+    expect(await unionWith(redBounded)).toEqual(["scripts/grant-admin.mjs", "server/_core/auditLog.ts"].sort());
+    const greenBounded = await computeBoundedHits({ [root + "/scripts/__ok__.mjs"]: writer });
+    expect(greenBounded.rawHits).toContain("scripts/__ok__.mjs");
+    expect(await unionWith(greenBounded)).toContain("scripts/__ok__.mjs");
   }, 480000);
 
   it("R18-1 sound 反例三案:拆字串串接/模板片段/字串值內 unicode escape 全數命中(prefilter 不可剪掉)", async () => {
@@ -1559,12 +1671,14 @@ describe("R13 adminAuditLog 直接寫入者 guard(TypeChecker+lexical 求值+SQL
   it("R18-3 四副檔名 raw overlay 承重(.js/.jsx/.cjs/.tsx 一次注入,全數進 union)", async () => {
     const root = process.cwd();
     const writer = 'const conn = { execute: async () => {} };\nconn.execute("INSERT INTO adminAuditLog (a) VALUES (1)");\n';
-    const union = await computeWriterUnion({
+    const bounded = await computeBoundedHits({
       [root + "/scripts/__m__.js"]: writer,
       [root + "/scripts/__m__.jsx"]: writer,
       [root + "/scripts/__m__.cjs"]: writer,
       [root + "/scripts/__m__.tsx"]: writer,
     });
+    for (const ext of ["js", "jsx", "cjs", "tsx"]) expect(bounded.rawHits).toContain(`scripts/__m__.${ext}`);
+    const union = await unionWith(bounded);
     for (const ext of ["js", "jsx", "cjs", "tsx"]) expect(union).toContain(`scripts/__m__.${ext}`);
     expect(union).not.toEqual(["scripts/grant-admin.mjs", "server/_core/auditLog.ts"].sort());
   }, 480000);
@@ -1579,7 +1693,9 @@ describe("R13 adminAuditLog 直接寫入者 guard(TypeChecker+lexical 求值+SQL
     ];
     for (const [p, src] of CASES) {
       expect(isRawSqlWriterSource(src, "/scan/" + p.split("/").pop()), p).toBe(true); // helper
-      const union = await computeWriterUnion({ [p]: src }); // 完整 union
+      const bounded = await computeBoundedHits({ [p]: src });
+      expect(bounded.rawHits, p).toContain(p.slice(root.length + 1)); // 條件三
+      const union = await unionWith(bounded);
       expect(union, p).toContain(p.slice(root.length + 1));
       expect(union, p).not.toEqual(["scripts/grant-admin.mjs", "server/_core/auditLog.ts"].sort());
     }
@@ -1594,8 +1710,9 @@ describe("R13 adminAuditLog 直接寫入者 guard(TypeChecker+lexical 求值+SQL
     expect(/execute|query/i.test(src)).toBe(false); // 前提自檢:無明文 callee
     expect(isRawSqlWriterSource(src, "/scan/__r19_esc__.mjs")).toBe(true);
     const p = root + "/scripts/__r19_esc__.mjs";
-    const union = await computeWriterUnion({ [p]: src });
-    expect(union).toContain("scripts/__r19_esc__.mjs");
+    const bounded = await computeBoundedHits({ [p]: src });
+    expect(bounded.rawHits).toContain("scripts/__r19_esc__.mjs"); // 條件三
+    expect(await unionWith(bounded)).toContain("scripts/__r19_esc__.mjs");
   }, 480000);
 
   it("R18-1 differential proof:全庫 raw 掃描「有/無優化」結果完全等價(R19-3:fresh scanner,雙掃可機械驗證)", async () => {
@@ -1622,27 +1739,31 @@ describe("R13 adminAuditLog 直接寫入者 guard(TypeChecker+lexical 求值+SQL
 
   it("R16-2 端到端突變(.ts Drizzle):經 discovery seam → 同一 exact-two gate 轉紅", async () => {
     const root = process.cwd();
-    const union = await computeWriterUnion({
+    const bounded = await computeBoundedHits({
       [root + "/scripts/__mutant__.ts"]:
         'import { adminAuditLog } from "../drizzle/schema";\ndeclare const db: { insert: (t: unknown) => { values: (v: unknown) => void } };\ndb.insert(adminAuditLog).values({});\n',
     });
+    expect(bounded.drizzleHits).toContain("scripts/__mutant__.ts"); // 條件三:TypeChecker 半邊
+    const union = await unionWith(bounded);
     expect(union).toContain("scripts/__mutant__.ts");
     expect(union).not.toEqual(["scripts/grant-admin.mjs", "server/_core/auditLog.ts"].sort());
   }, 240000);
 
   it("R16-2 端到端突變(.mjs Drizzle):TypeChecker discovery 必收 .mjs(raw 旁路不得代打)→ gate 轉紅", async () => {
     const root = process.cwd();
-    const union = await computeWriterUnion({
+    const bounded = await computeBoundedHits({
       [root + "/scripts/__mutant__.mjs"]:
         'import { adminAuditLog } from "../drizzle/schema.js";\nconst db = { insert: (t) => ({ values: () => {} }) };\ndb.insert(adminAuditLog).values({});\n',
     });
+    expect(bounded.drizzleHits).toContain("scripts/__mutant__.mjs"); // 條件三:.mjs 必須由 TypeChecker 半邊收
+    const union = await unionWith(bounded);
     expect(union).toContain("scripts/__mutant__.mjs");
     expect(union).not.toEqual(["scripts/grant-admin.mjs", "server/_core/auditLog.ts"].sort());
   }, 240000);
 
   it("R16-2 端到端突變(combined:.ts+.mjs Drizzle+.mjs raw SQL)→ 全數被抓,gate 轉紅", async () => {
     const root = process.cwd();
-    const union = await computeWriterUnion({
+    const bounded = await computeBoundedHits({
       [root + "/scripts/__mutant__.ts"]:
         'import { adminAuditLog } from "../drizzle/schema";\ndeclare const db: { insert: (t: unknown) => { values: (v: unknown) => void } };\ndb.insert(adminAuditLog).values({});\n',
       [root + "/scripts/__mutant__.mjs"]:
@@ -1650,10 +1771,20 @@ describe("R13 adminAuditLog 直接寫入者 guard(TypeChecker+lexical 求值+SQL
       [root + "/scripts/__mutant_raw__.mjs"]:
         'const conn = { execute: async () => {} };\nawait conn.execute("INSERT INTO adminAuditLog (a) VALUES (1)");\n',
     });
+    // 條件三:兩個半邊各自先證,再併 union
+    expect(bounded.drizzleHits).toContain("scripts/__mutant__.ts");
+    expect(bounded.drizzleHits).toContain("scripts/__mutant__.mjs");
+    expect(bounded.rawHits).toContain("scripts/__mutant_raw__.mjs");
+    const union = await unionWith(bounded);
     expect(union).toContain("scripts/__mutant__.ts");
     expect(union).toContain("scripts/__mutant__.mjs");
     expect(union).toContain("scripts/__mutant_raw__.mjs");
     expect(union).not.toEqual(["scripts/grant-admin.mjs", "server/_core/auditLog.ts"].sort());
+    // R21-1(末次確認):整支檔案跑完,建立接縫上的 full-repo Program 仍恰為 1 次
+    const full = await fullRepoBuilds();
+    expect(full).toHaveLength(1);
+    const b = await getBaseline();
+    expect(full[0].rootCount).toBe(new Set([b.schemaPath, ...b.canonical]).size);
   }, 240000);
 
 });
