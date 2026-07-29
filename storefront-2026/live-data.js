@@ -17,7 +17,7 @@
 (function () {
   "use strict";
 
-  var API_BASE = window.PACKGO_API_BASE || ""; // 同源:正式站自己就有 /api
+  var API_BASE = window.PACKGO_API_BASE || ""; // 空字串 = 同源。本機由 dev-server.mjs 代理
   var PAGE_SIZE = 12;
 
   // ── 機票含不含:唯一誠實來源是 costExplanation ───────────────────────────
@@ -180,7 +180,8 @@
       .then(function (payload) {
         var data = unwrap(payload);
         var rows = data && data.tours;
-        if (!Array.isArray(rows) || rows.length === 0) throw new Error("no tours in payload");
+        if (!Array.isArray(rows)) throw new Error("bad payload shape");
+        if (rows.length === 0) return [];  // 真的沒有公開行程 → 誠實的空,不是錯誤
         var ids = rows.map(function (r) { return r.id; }).filter(function (n) { return typeof n === "number"; });
         return getJson(trpcUrl("departures.getNextBatch", { tourIds: ids }))
           .then(function (depPayload) { return { rows: rows, deps: unwrap(depPayload) || {} }; })
@@ -194,6 +195,9 @@
 
   function apply(live) {
     if (typeof BC_TOURS === "undefined" || !Array.isArray(BC_TOURS)) return;
+    // 空也要套用。上線第一天的教訓:抓不到就留著設計樣本,等於在正式站對客人
+    // 顯示不存在的行程與價格 —— 那比空白嚴重得多。
+
     BC_TOURS.length = 0;
     Array.prototype.push.apply(BC_TOURS, live);
     if (typeof BC_DETAIL_TOURS !== "undefined" && Array.isArray(BC_DETAIL_TOURS)) {
@@ -213,8 +217,11 @@
     fetchTours()
       .then(apply)
       .catch(function (err) {
+        // 取不到資料時「清空」而不是留樣本。寧可讓客人看到「目前沒有公開行程」,
+        // 也不能讓他看到一筆我們其實不賣的團和一個不存在的價格。
         window.PACKGO_LIVE = { ok: false, reason: String((err && err.message) || err) };
-        console.warn("[live-data] 取真資料失敗,維持設計樣本:", err);
+        console.warn("[live-data] 取真資料失敗,清空行程(不顯示設計樣本):", err);
+        try { apply([]); } catch (e) { /* 清空失敗就維持原狀,至少不再惡化 */ }
       });
   }
 

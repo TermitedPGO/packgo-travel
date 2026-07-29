@@ -886,6 +886,8 @@ function bcCurrentTour() {
 }
 
 function bcDemoNotice(subject = L("價格、日期、餘位與操作", "prices, dates, seats and actions", "precios, fechas, plazas y acciones")) {
+  // 接上真實資料後,這條原型聲明不再適用,掛在正式站上只會讓客人困惑。
+  if (typeof window !== "undefined" && window.PACKGO_LIVE) return "";
   return `<div class="prototype-notice"><b>${L("設計示意", "DESIGN DEMO", "DEMO DE DISEÑO")}</b><span>${L(`${subject}為介面示意；不會送出資料、扣款、訂位或寄信。`, `${subject} are demos; no data, charge, booking or email.`, `${subject} son demos; sin datos, cobros, reservas ni correos.`)}</span></div>`;
 }
 
@@ -2423,6 +2425,9 @@ function bcCatalogFilters(resultCount) {
 }
 
 function bcTaiwanCatalogEntry() {
+  // 誠信守門(2026-07-29 上線第一天):這張是設計樣本行程。一旦接上真實
+  // 資料(window.PACKGO_LIVE 存在),正式站不得再出現任何虛構商品。
+  if (typeof window !== "undefined" && window.PACKGO_LIVE) return "";
   const t = BC_TAIWAN_TOUR;
   const destination = L("台灣・經典環島","Taiwan · Classic circuit","Taiwán · circuito clásico");
   const title = L("福森號 × 鳴日號｜經典台灣環島八日","Formosensis × Future Express · Classic Taiwan Circuit","Formosensis × Future Express · Circuito clásico de Taiwán");
