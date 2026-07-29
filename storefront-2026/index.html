@@ -1448,7 +1448,7 @@
   <script src="./assets/vendor/jsvectormap/world.js?v=1.7.0"></script>
   <script src="./assets/vendor/maplibre/maplibre-gl.js?v=5.24.0"></script>
   <script src="./itinerary-contract-data.js?v=20260716-1"></script>
-  <script src="./bc.js?v=20260729-3"></script>
+  <script src="./bc.js?v=20260729-4"></script>
     <script src="./live-data.js?v=20260729-1"></script>
   <script src="./map-layout-lab.js?v=20260716-17"></script>
   <script>
@@ -1498,7 +1498,13 @@
       if (renderBackground) {
         if (typeof bcDestroyRegionalExplorer === "function") bcDestroyRegionalExplorer();
         if (typeof bcDestroyMapLayoutLab === "function") bcDestroyMapLayoutLab();
-        appRoot.innerHTML = `${isBC ? bcHeader() : header()}${map[state.view][state.variant]()}${isBC ? bcFooter() : footer()}`;
+        // 上線守門(2026-07-29):還沒接上真實系統的畫面,正式站不輸出示範內容。
+        const notLive =
+          typeof BC_NOT_LIVE_VIEWS !== "undefined" &&
+          BC_NOT_LIVE_VIEWS.has(state.view) &&
+          typeof bcIsPrototypeEnv === "function" && !bcIsPrototypeEnv();
+        const viewHtml = notLive ? bcNotLiveNotice() : map[state.view][state.variant]();
+        appRoot.innerHTML = `${isBC ? bcHeader() : header()}${viewHtml}${isBC ? bcFooter() : footer()}`;
         if (typeof bcRemovePrototypeLanguage === "function") bcRemovePrototypeLanguage(appRoot);
         if (isBC && typeof bcLocalizeVisibleLanguage === "function") bcLocalizeVisibleLanguage(appRoot);
         if (isBC && typeof bcStripVisiblePunctuation === "function") bcStripVisiblePunctuation(appRoot);

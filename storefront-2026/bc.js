@@ -2358,6 +2358,45 @@ function bcHomeNoInventory() {
   return `<section class="bc-home-editorial"><header class="bc-home-editorial-intro"><p class="eyebrow">PACK&GO · CALIFORNIA</p><h1><span>${L("旅行的事","Travel, handled","Viajes, resueltos")}</span><span>${L("交給我們處理","by Pack &amp; Go","por Pack &amp; Go")}</span></h1><aside class="bc-home-editorial-guide"><small>${L("團體行程","GROUP JOURNEYS","VIAJES EN GRUPO")}</small><p>${L("目前沒有公開販售的團體行程<br>需要客製或包團請直接告訴我們","No group journeys are open for sale right now<br>Tell us what you need and we will build it","No hay circuitos abiertos ahora<br>Cuéntenos qué necesita")}</p><button data-view="custom">${L("客製旅行","Custom travel","Viaje a medida")}</button><button class="bc-home-editorial-all" data-view="services">${L("看全部旅行服務","See every service","Ver todos los servicios")}</button></aside></header></section>`;
 }
 
+/* ──────────────────────────────────────────────────────────────────────────
+   上線守門(2026-07-29)
+
+   這份程式碼原本是設計原型,裡面有整套「示範會員」:虛構的訂單編號、虛構的
+   金額、虛構的旅客文件,甚至一顆「支付尾款」按鈕。那些在給人看設計時是對的,
+   放在旅行社的正式網站上是不對的 —— 客人可能以為那是他的訂單,或以為我們
+   真的在跟他收錢。
+
+   所以:凡是還沒接上真實系統的畫面,正式站一律不開,顯示一頁誠實的說明。
+   本機(localhost)不受限制,設計比較照舊可用。
+   接完一頁就把它從這張表拿掉一行。
+   ────────────────────────────────────────────────────────────────────────── */
+const BC_NOT_LIVE_VIEWS = new Set([
+  "member",        // 會員中心首頁(示範會員)
+  "orders",        // 我的訂單(虛構訂單 PG-1042 等)
+  "order-detail",  // 訂單詳情與進度
+  "travelers",     // 旅客資料與文件
+  "payments",      // 付款與收據(含「支付尾款」按鈕)
+  "favorites",     // 收藏行程
+  "membership",    // 會員方案
+  "checkout",      // 結帳
+  "map-story-demo",// 地圖敘事比較樣板
+  "map-layout-lab",// 地圖版面實驗
+]);
+
+function bcIsPrototypeEnv() {
+  return typeof location !== "undefined" && /^(localhost|127\.0\.0\.1|\[::1\])$/.test(location.hostname);
+}
+
+function bcNotLiveNotice() {
+  return `<main class="bc-not-live"><section class="bc-shell section" style="max-width:640px;margin:0 auto;padding:96px 24px;">
+<p class="eyebrow">PACK&GO</p>
+<h1 style="font-size:24px;line-height:1.5;margin:12px 0 20px;">${L("這個區塊還在整理","This section is being rebuilt","Esta sección está en preparación")}</h1>
+<p style="color:#555;line-height:1.9;">${L("會員中心、訂單與付款正在重建,還沒開放。已經送出的訂單與付款不受影響,我們會直接與您聯絡。","The member area, orders and payments are being rebuilt and are not open yet. Existing bookings and payments are unaffected; we will contact you directly.","El área de socios, los pedidos y los pagos se están reconstruyendo. Las reservas existentes no se ven afectadas.")}</p>
+<p style="color:#555;line-height:1.9;">${L("需要協助請致電 +1 (510) 634-2307 或回覆您收到的信件。","Call +1 (510) 634-2307 or reply to your email for help.","Llame al +1 (510) 634-2307 o responda a su correo.")}</p>
+<button data-view="home" style="margin-top:24px;">${L("回首頁","Back to home","Volver al inicio")} →</button>
+</section></main>`;
+}
+
 function homeBC() {
   // 誠信守門(2026-07-29):沒有任何公開行程時,首頁不得拿設計樣本充當主打。
   // 行程總閘關閉或型錄清空後 BC_TOURS 會是空的;這時改出一個不含行程的首頁,
