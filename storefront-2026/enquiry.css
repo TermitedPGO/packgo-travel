@@ -1,0 +1,108 @@
+/* enquiry.css — 詢問面板。刻意用設計原稿的黑白骨架語彙,不引入新的視覺系統。 */
+#pg-enquiry-root { display: none; }
+#pg-enquiry-root.is-open { display: block; }
+
+.pg-enquiry-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(17, 17, 17, 0.55);
+  z-index: 9000;
+}
+
+.pg-enquiry-panel {
+  position: fixed;
+  z-index: 9001;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: min(520px, calc(100vw - 32px));
+  max-height: calc(100vh - 48px);
+  overflow-y: auto;
+  background: #fff;
+  color: #111;
+  border-radius: 4px;
+  padding: 32px 32px 28px;
+  box-shadow: 0 24px 64px rgba(0, 0, 0, 0.28);
+  font-family: "Noto Sans TC", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+}
+
+.pg-enquiry-x {
+  position: absolute;
+  top: 10px;
+  right: 14px;
+  border: 0;
+  background: none;
+  font-size: 26px;
+  line-height: 1;
+  cursor: pointer;
+  color: #888;
+}
+.pg-enquiry-x:hover { color: #111; }
+
+.pg-enquiry-eyebrow {
+  margin: 0 0 6px;
+  font-size: 11px;
+  letter-spacing: 0.18em;
+  color: #999;
+}
+.pg-enquiry-panel h2 { margin: 0 0 10px; font-size: 21px; letter-spacing: 0.01em; }
+.pg-enquiry-sub { margin: 0 0 20px; color: #555; line-height: 1.8; font-size: 14px; }
+
+.pg-enquiry-form { display: grid; gap: 14px; }
+.pg-enquiry-form label {
+  display: grid;
+  gap: 6px;
+  font-size: 12px;
+  letter-spacing: 0.06em;
+  color: #666;
+}
+.pg-enquiry-form input,
+.pg-enquiry-form textarea {
+  font: inherit;
+  font-size: 15px;
+  color: #111;
+  padding: 11px 12px;
+  border: 1px solid #ddd;
+  border-radius: 3px;
+  background: #fff;
+  width: 100%;
+  box-sizing: border-box;
+}
+.pg-enquiry-form input:focus,
+.pg-enquiry-form textarea:focus { outline: none; border-color: #111; }
+.pg-enquiry-form textarea { resize: vertical; line-height: 1.7; }
+
+.pg-enquiry-error {
+  margin: 0;
+  color: #b42318;
+  font-size: 13px;
+  line-height: 1.7;
+}
+
+.pg-enquiry-send {
+  margin-top: 4px;
+  padding: 13px 20px;
+  border: 0;
+  border-radius: 3px;
+  background: #111;
+  color: #fff;
+  font: inherit;
+  font-size: 15px;
+  letter-spacing: 0.05em;
+  cursor: pointer;
+}
+.pg-enquiry-send:disabled { opacity: 0.55; cursor: default; }
+
+.pg-enquiry-alt {
+  margin: 18px 0 0;
+  padding-top: 16px;
+  border-top: 1px solid #eee;
+  font-size: 13px;
+  color: #666;
+  line-height: 1.9;
+}
+.pg-enquiry-alt a { color: #111; }
+
+@media (max-width: 520px) {
+  .pg-enquiry-panel { padding: 26px 20px 22px; }
+}
