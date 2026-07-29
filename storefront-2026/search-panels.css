@@ -1,0 +1,79 @@
+/* search-panels.css — 機票／飯店搜尋列。沿用設計原稿的黑白骨架,不引入新視覺系統。 */
+.pg-sf { display: block; }
+
+.pg-sf-tabs { display: flex; gap: 6px; margin-bottom: 14px; }
+.pg-sf-tabs button {
+  border: 1px solid #ddd; background: #fff; color: #666;
+  padding: 8px 18px; border-radius: 999px; font: inherit; font-size: 14px; cursor: pointer;
+}
+.pg-sf-tabs button.is-on { background: #111; border-color: #111; color: #fff; }
+
+.pg-sf-row {
+  display: grid; gap: 10px; align-items: end;
+  background: #fff; border: 1px solid #e6e6e6; border-radius: 6px; padding: 16px;
+}
+.pg-sf-flight { grid-template-columns: 1.2fr 1.2fr 1fr 1fr 0.7fr 1fr auto; }
+.pg-sf-hotel { grid-template-columns: 1.6fr 1fr 1fr 0.7fr 0.7fr auto; }
+
+.pg-sf-field { display: grid; gap: 5px; min-width: 0; }
+.pg-sf-field > span { font-size: 11px; letter-spacing: 0.08em; color: #888; }
+.pg-sf-field input, .pg-sf-field select {
+  font: inherit; font-size: 15px; color: #111;
+  padding: 10px 11px; border: 1px solid #ddd; border-radius: 3px; background: #fff;
+  width: 100%; box-sizing: border-box; min-width: 0;
+}
+.pg-sf-field input:focus, .pg-sf-field select:focus { outline: none; border-color: #111; }
+
+.pg-sf-go {
+  border: 0; border-radius: 3px; background: #111; color: #fff;
+  font: inherit; font-size: 15px; letter-spacing: 0.04em;
+  padding: 12px 26px; cursor: pointer; white-space: nowrap; height: 42px;
+}
+.pg-sf-note { margin: 12px 2px 0; font-size: 13px; color: #666; line-height: 1.9; }
+.pg-sf-note a { color: #111; }
+
+@media (max-width: 1080px) {
+  .pg-sf-flight { grid-template-columns: 1fr 1fr 1fr; }
+  .pg-sf-hotel { grid-template-columns: 1fr 1fr 1fr; }
+  .pg-sf-go { grid-column: 1 / -1; width: 100%; }
+}
+@media (max-width: 560px) {
+  .pg-sf-flight, .pg-sf-hotel { grid-template-columns: 1fr 1fr; }
+}
+
+/* 快捷 chip */
+.pg-sf-quick {
+  display: flex; flex-wrap: wrap; gap: 8px; align-items: center;
+  margin: 0 0 10px;
+}
+.pg-sf-quick > span {
+  font-size: 11px; letter-spacing: 0.1em; color: #999;
+  margin-right: 4px; white-space: nowrap;
+}
+.pg-sf-chip {
+  display: inline-flex; align-items: center; gap: 7px;
+  border: 1px solid #ddd; background: #fff; color: #333;
+  padding: 7px 14px; border-radius: 999px;
+  font: inherit; font-size: 13px; cursor: pointer; white-space: nowrap;
+}
+.pg-sf-chip:hover { border-color: #111; color: #111; }
+.pg-sf-chip.is-picked { background: #111; border-color: #111; color: #fff; }
+.pg-sf-chip.is-picked i { background: rgba(255,255,255,.22); color: #fff; }
+.pg-sf-chip.ghost { border-style: dashed; color: #666; }
+.pg-sf-chip i {
+  font-style: normal; font-size: 10px; line-height: 1;
+  background: #f0f0f0; color: #888;
+  padding: 3px 5px; border-radius: 3px;
+}
+
+/* 鍵盤提示 */
+.pg-sf-keys { margin: 8px 2px 0; font-size: 12px; color: #999; line-height: 2; }
+.pg-sf-keys kbd {
+  font: inherit; font-size: 11px;
+  border: 1px solid #ddd; border-bottom-width: 2px; border-radius: 3px;
+  padding: 1px 6px; background: #fafafa; color: #555;
+}
+@media (max-width: 560px) {
+  .pg-sf-keys { display: none; }
+  .pg-sf-chip i { display: none; }
+}

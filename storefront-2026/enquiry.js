@@ -137,6 +137,11 @@
     var el = host();
     el.innerHTML = panelHtml();
     var brief = briefFromFlow(flowId);
+    // 機票／飯店搜尋列送來的條件(search-panels.js 先放到 window.PACKGO_PREFILL)
+    if (!brief && window.PACKGO_PREFILL) {
+      brief = String(window.PACKGO_PREFILL);
+      window.PACKGO_PREFILL = "";
+    }
     if (brief) {
       var ta = el.querySelector("textarea[name=message]");
       if (ta) ta.value = brief + "\n\n";
