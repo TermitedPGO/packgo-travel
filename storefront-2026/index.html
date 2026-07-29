@@ -937,7 +937,11 @@
 
     const params = new URLSearchParams(location.search);
     const state = {
-      variant: ["A","B","C","BC"].includes(params.get("variant")) ? params.get("variant") : "A",
+      // 2026-07-29 上線:正式站只有 BC 一種版本。
+      // A/B/C 是原型比較用的舊版面,裡面全是虛構行程與價格;留著等於 packgoplay.com
+      // 上多了三個會顯示不存在商品的網址(?variant=C 之類)。一律鎖死 BC,
+      // 網址帶什麼都不理會。要在本機比較舊版面,把這行改回去即可。
+      variant: "BC",
       view: ["home","tour-finder","tours","detail","map-story-demo","map-layout-lab","services","flights","visa","china-visa","china-visa-check","group","transfer","hotel","custom","help","contact","about","membership","login","member","orders","order-detail","travelers","payments","checkout","favorites"].includes(params.get("view")) ? params.get("view") : "home",
       language: ["zh","en"].includes(params.get("lang")) ? params.get("lang") : "zh",
       currency: ["USD","TWD","CNY"].includes(params.get("currency")) ? params.get("currency") : "USD",
@@ -1444,7 +1448,7 @@
   <script src="./assets/vendor/jsvectormap/world.js?v=1.7.0"></script>
   <script src="./assets/vendor/maplibre/maplibre-gl.js?v=5.24.0"></script>
   <script src="./itinerary-contract-data.js?v=20260716-1"></script>
-  <script src="./bc.js?v=20260729-1"></script>
+  <script src="./bc.js?v=20260729-3"></script>
     <script src="./live-data.js?v=20260729-1"></script>
   <script src="./map-layout-lab.js?v=20260716-17"></script>
   <script>

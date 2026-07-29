@@ -2353,7 +2353,18 @@ function bcHomeTourFinder() {
   return `<section id="bc-tour-finder" class="bc-home-finder" aria-labelledby="bc-tour-finder-question"><header class="bc-finder-progress"><div><p>${L("四個選擇 找到方向","Four choices to find a direction","Cuatro elecciones para encontrar rumbo")}</p>${progress?`<button class="bc-finder-progress-back" data-tour-finder-back>${L("返回上一題","Previous question","Pregunta anterior")}</button>`:""}</div><ol aria-label="${L("找團進度","Finder progress","Progreso")}">${[0,1,2,3].map(i=>`<li class="${i===progress?"active":i<progress?"done":""}"><span>0${i+1}</span></li>`).join("")}</ol></header><div class="bc-home-finder-question bc-home-finder-question-${q.key}"><p>${L(`第 ${progress+1} 題　共 4 題`,`Question ${progress+1} of 4`,`Pregunta ${progress+1} de 4`)}</p><h3 id="bc-tour-finder-question" tabindex="-1">${q.title}</h3><div>${q.options.map(([value,title,copy],index)=>`<button data-tour-finder-answer="${value}" data-tour-finder-key="${q.key}"><img src="${optionImages[value]}" alt="" aria-hidden="true" loading="${index===0?"eager":"lazy"}"/><em>${String(index+1).padStart(2,"0")}</em><span><b>${title}</b><small>${copy}</small></span></button>`).join("")}</div></div></section>`;
 }
 
+/** 沒有公開行程時的首頁主視覺。只用品牌與服務,不碰任何行程資料。 */
+function bcHomeNoInventory() {
+  return `<section class="bc-home-editorial"><header class="bc-home-editorial-intro"><p class="eyebrow">PACK&GO · CALIFORNIA</p><h1><span>${L("旅行的事","Travel, handled","Viajes, resueltos")}</span><span>${L("交給我們處理","by Pack &amp; Go","por Pack &amp; Go")}</span></h1><aside class="bc-home-editorial-guide"><small>${L("團體行程","GROUP JOURNEYS","VIAJES EN GRUPO")}</small><p>${L("目前沒有公開販售的團體行程<br>需要客製或包團請直接告訴我們","No group journeys are open for sale right now<br>Tell us what you need and we will build it","No hay circuitos abiertos ahora<br>Cuéntenos qué necesita")}</p><button data-view="custom">${L("客製旅行","Custom travel","Viaje a medida")}</button><button class="bc-home-editorial-all" data-view="services">${L("看全部旅行服務","See every service","Ver todos los servicios")}</button></aside></header></section>`;
+}
+
 function homeBC() {
+  // 誠信守門(2026-07-29):沒有任何公開行程時,首頁不得拿設計樣本充當主打。
+  // 行程總閘關閉或型錄清空後 BC_TOURS 會是空的;這時改出一個不含行程的首頁,
+  // 只講服務,不出現任何我們其實沒有在賣的團與價格。
+  if (!Array.isArray(BC_TOURS) || BC_TOURS.length === 0) {
+    return `<main id="bc-home-redesign" tabindex="-1" class="bc-home-redesign bc-home-noinventory">${bcHomeNoInventory()}${bcHomeServicePriority()}</main>`;
+  }
   const lead = BC_TOURS[0];
   const versions = {
     A:()=>bcHomeVersionA(lead),
