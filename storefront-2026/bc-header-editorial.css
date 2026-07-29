@@ -1,0 +1,81 @@
+/* PACK&GO BC header — centered editorial masthead selected from the 2026-07-17 layout lab. */
+
+.variant-bc .bc-nav { background: rgba(255,255,255,.985); }
+.variant-bc #prototype-switcher[hidden] { display: none !important; }
+.variant-bc .bc-header-editorial .bc-nav-inner {
+  width: min(1380px, calc(100% - 64px));
+  min-height: 84px;
+  grid-template-columns: minmax(0,1fr) auto minmax(0,1fr);
+  grid-template-areas: "links brand tools";
+  gap: 28px;
+}
+.variant-bc .bc-header-editorial .bc-brand { grid-area: brand; }
+.variant-bc .bc-header-editorial .bc-brand {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+}
+.variant-bc .bc-header-editorial .bc-brand-mark { display: block; width: 28px; height: 39px; }
+.variant-bc .bc-header-editorial .bc-brand-wordmark { width: 158px; }
+.variant-bc .bc-header-editorial .bc-nav-links { grid-area: links; gap: clamp(18px,2vw,32px); }
+.variant-bc .bc-header-editorial .bc-nav-tools { grid-area: tools; }
+.variant-bc .bc-header-editorial .bc-nav-link { min-height: 48px; }
+.variant-bc .bc-header-editorial .bc-nav-link > span {
+  font-size: 15px;
+  font-weight: 820;
+  letter-spacing: -.015em;
+}
+.variant-bc .bc-header-editorial .bc-nav-link > small { display: none; }
+.variant-bc .bc-header-editorial .bc-nav-link::after {
+  bottom: 6px;
+  height: 2px;
+  border-radius: 99px;
+}
+.variant-bc .bc-header-editorial .bc-locale-button,
+.variant-bc .bc-header-editorial .bc-member-button,
+.variant-bc .bc-header-editorial .bc-menu-label { font-size: 15px; }
+.variant-bc .bc-header-editorial .bc-member-button { border: 0; background: transparent; }
+.variant-bc .bc-header-editorial .bc-member-button:hover,
+.variant-bc .bc-header-editorial .bc-member-button[aria-current="page"] { background: #000; color: #fff; }
+.variant-bc .bc-header-editorial .bc-menu-toggle.bc-menu-toggle-visible {
+  min-width: 122px;
+  border: 0;
+  border-radius: 22px;
+  background: #000;
+  color: #fff;
+}
+.variant-bc .bc-header-editorial .bc-menu-toggle.bc-menu-toggle-visible:hover,
+.variant-bc .bc-header-editorial .bc-menu-toggle.bc-menu-toggle-visible.active { background: #262626; color: #fff; }
+
+@media (max-width: 1180px) and (min-width: 901px) {
+  .variant-bc .bc-header-editorial .bc-nav-inner { width: min(100% - 40px, 1120px); gap: 22px; }
+  .variant-bc .bc-header-editorial .bc-brand-mark { width: 25px; height: 35px; }
+  .variant-bc .bc-header-editorial .bc-brand-wordmark { width: 138px; }
+  .variant-bc .bc-header-editorial .bc-nav-links { gap: 18px; }
+  .variant-bc .bc-header-editorial .bc-nav-link > span { font-size: 14px; }
+  .variant-bc .bc-header-editorial .bc-locale-button { display: none; }
+}
+
+@media (max-width: 900px) {
+  .variant-bc .bc-header-editorial .bc-nav-inner {
+    width: min(100% - 24px, var(--bc-max));
+    min-height: 68px;
+    display: grid;
+    grid-template-columns: 1fr auto;
+    grid-template-rows: auto;
+    grid-template-areas: "brand tools";
+    gap: 12px;
+    padding: 0;
+  }
+  .variant-bc .bc-header-editorial .bc-brand { grid-area: brand; }
+  .variant-bc .bc-header-editorial .bc-brand-mark { display: block; width: 25px; height: 35px; }
+  .variant-bc .bc-header-editorial .bc-brand-wordmark { width: 112px; }
+  .variant-bc .bc-header-editorial .bc-nav-links { display: none; }
+  .variant-bc .bc-header-editorial .bc-nav-tools { grid-area: tools; }
+  .variant-bc .bc-header-editorial .bc-nav-tools > :not(.bc-menu-toggle) { display: none; }
+  .variant-bc .bc-header-editorial .bc-menu-toggle.bc-menu-toggle-visible { min-width: 104px; height: 46px; padding-inline: 11px; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .variant-bc .bc-header-editorial .bc-nav-link::after { transition: none; }
+}

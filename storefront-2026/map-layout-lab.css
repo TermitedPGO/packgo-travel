@@ -1,0 +1,116 @@
+/* THROWAWAY PROTOTYPE — automatic itinerary-map layout stress lab. */
+.bc-layout-lab { --lab-line:#d7d7d2; background:#fff; color:#0a0a0a; }
+.bc-layout-lab-hero { width:min(1320px,calc(100% - 40px)); display:grid; grid-template-columns:minmax(0,1.1fr) minmax(320px,.55fr); align-items:end; gap:48px; margin:0 auto; padding:88px 0 48px; border-bottom:1px solid #000; }
+.bc-layout-lab-hero h1 { max-width:900px; margin:8px 0 0; font-family:var(--serif); font-size:clamp(54px,6.2vw,92px); font-weight:650; line-height:.94; letter-spacing:-.055em; }
+.bc-layout-lab-hero > p { margin:0; font-size:14px; line-height:1.75; }
+.bc-layout-lab-index { width:min(1320px,calc(100% - 40px)); display:grid; grid-template-columns:repeat(4,1fr); margin:0 auto 74px; border-bottom:1px solid #000; }
+.bc-layout-lab-index a { display:flex; align-items:center; justify-content:space-between; min-height:76px; border-right:1px solid var(--lab-line); color:#000; padding:16px 20px; text-decoration:none; }
+.bc-layout-lab-index a:last-child { border-right:0; }
+.bc-layout-lab-index a:hover { background:#000; color:#fff; }
+.bc-layout-lab-index b { font-size:16px; }
+.bc-layout-lab-index span { font-size:14px; font-weight:850; letter-spacing:.08em; text-transform:uppercase; }
+.bc-layout-case { width:min(1320px,calc(100% - 40px)); margin:0 auto; padding:0 0 96px; scroll-margin-top:88px; }
+.bc-layout-case + .bc-layout-case { padding-top:78px; border-top:1px solid #000; }
+.bc-layout-case-head { display:grid; grid-template-columns:minmax(0,1fr) minmax(280px,.48fr); align-items:end; gap:42px; margin-bottom:26px; }
+.bc-layout-case-head h2 { margin:7px 0 0; font-family:var(--serif); font-size:clamp(40px,4.4vw,62px); line-height:1; letter-spacing:-.04em; }
+.bc-layout-case-head > p { margin:0; font-size:14px; line-height:1.7; }
+.bc-layout-pan-cue { display:none; }
+.bc-layout-map-frame { position:relative; overflow:hidden; border-radius:28px; background:#d9d9d6; }
+.bc-layout-map { height:590px; }
+.bc-layout-case.is-long .bc-layout-map { height:660px; }
+.bc-journey-map-scope .bc-layout-map { width:100%; height:100%; }
+.bc-destination-detail .bc-journey-map-scope .bc-layout-attribution,
+.bc-taiwan-detail .bc-journey-map-scope .bc-layout-attribution { right:14px; bottom:12px; left:14px; }
+.bc-layout-map .maplibregl-canvas { filter:grayscale(1) contrast(.96); }
+.bc-layout-map-status { position:absolute; z-index:4; top:18px; left:18px; display:flex; gap:16px; border-radius:999px; background:rgba(255,255,255,.94); padding:10px 14px; box-shadow:0 7px 22px rgba(0,0,0,.12); font-size:14px; font-weight:900; letter-spacing:.08em; }
+.bc-layout-attribution { position:absolute; z-index:4; right:16px; bottom:12px; border-radius:999px; background:rgba(255,255,255,.9); padding:7px 10px; color:#111; font-size:14px; font-weight:800; }
+.bc-layout-attribution a { color:inherit; }
+.bc-layout-marker-root { width:0; height:0; position:relative; overflow:visible; }
+.bc-layout-geo-anchor,.bc-layout-day-anchor,.bc-layout-leader { display:none; }
+.bc-layout-marker-labels { position:absolute; z-index:6; display:flex; gap:6px; white-space:nowrap; }
+.bc-layout-marker-labels button { position:relative; z-index:1; width:40px; height:40px; min-width:40px; min-height:40px; flex:0 0 40px; display:grid; place-items:center; overflow:visible; border:0; border-radius:50%; background:transparent; color:#000; padding:0; cursor:pointer; font:inherit; }
+.bc-layout-marker-labels button b { position:relative; z-index:2; width:38px; height:38px; display:grid; place-items:center; border:2px solid #fff; border-radius:50%; background:#111; color:#fff; box-shadow:0 0 0 1px #111,0 4px 10px rgba(0,0,0,.15); font-size:14px; font-weight:900; }
+.bc-layout-marker-labels button span { position:absolute; z-index:1; top:50%; left:calc(100% - 4px); width:max-content; max-width:0; height:38px; display:flex; align-items:center; overflow:hidden; visibility:hidden; opacity:0; transform:translateY(-50%); border:0 solid #111; border-left:0; border-radius:0 999px 999px 0; background:rgba(255,255,255,.98); padding:0; box-shadow:0 4px 12px rgba(0,0,0,.14); font-size:14px; font-weight:850; pointer-events:none; transition:max-width .2s ease,opacity .15s ease,padding .2s ease; }
+.bc-layout-marker-labels button[aria-pressed="true"] b { border-color:#fff; background:#111; color:#fff; box-shadow:0 0 0 2px #fff,0 0 0 4px #111,0 4px 10px rgba(0,0,0,.18); }
+.bc-layout-marker-labels button.is-compact { width:36px; height:36px; min-width:36px; min-height:36px; flex-basis:36px; }
+.bc-layout-marker-labels button.is-compact b,
+.bc-layout-marker-labels button.is-compact[aria-pressed="true"] b { width:34px; height:34px; font-size:14px; }
+.bc-layout-marker-labels button.name-left span { right:calc(100% - 4px); left:auto; border-right:0; border-left-width:1px; border-radius:999px 0 0 999px; }
+.bc-layout-marker-labels button.name-top span,.bc-layout-marker-labels button.name-bottom span { left:50%; height:30px; transform:translateX(-50%); border:1px solid #111; border-radius:999px; }
+.bc-layout-marker-labels button.name-top span { top:auto; bottom:calc(100% + 7px); }
+.bc-layout-marker-labels button.name-bottom span { top:calc(100% + 7px); }
+@media (hover:hover) {
+  .bc-layout-marker-labels button:hover,.bc-layout-marker-labels button:focus-visible,.bc-layout-marker-labels button.is-preview { z-index:20; }
+  .bc-layout-marker-labels button:hover span,.bc-layout-marker-labels button:focus-visible span,.bc-layout-marker-labels button.is-preview span { max-width:170px; visibility:visible; opacity:1; border-width:1px; border-left-width:0; padding:0 10px 0 12px; }
+  .bc-layout-marker-labels button.name-left:hover span,
+  .bc-layout-marker-labels button.name-left:focus-visible span,
+  .bc-layout-marker-labels button.name-left.is-preview span { border-right-width:0; border-left-width:1px; padding:0 12px 0 10px; }
+  .bc-layout-marker-labels button.name-top:hover span,
+  .bc-layout-marker-labels button.name-bottom:hover span,
+  .bc-layout-marker-labels button.name-top:focus-visible span,
+  .bc-layout-marker-labels button.name-bottom:focus-visible span,
+  .bc-layout-marker-labels button.name-top.is-preview span,
+  .bc-layout-marker-labels button.name-bottom.is-preview span { border-width:1px; padding:0 10px; }
+}
+.bc-layout-marker-labels button:focus-visible { outline:3px solid #000; outline-offset:4px; }
+.bc-layout-marker-root.pos-top .bc-layout-marker-labels { left:0; bottom:18px; transform:translateX(-50%); }
+.bc-layout-marker-root.pos-bottom .bc-layout-marker-labels { left:0; top:18px; transform:translateX(-50%); }
+.bc-layout-marker-root.pos-left .bc-layout-marker-labels { right:18px; top:0; transform:translateY(-50%); }
+.bc-layout-marker-root.pos-right .bc-layout-marker-labels { left:18px; top:0; transform:translateY(-50%); }
+.bc-layout-marker-root.pos-top-left .bc-layout-marker-labels { right:14px; bottom:14px; }
+.bc-layout-marker-root.pos-top-right .bc-layout-marker-labels { left:14px; bottom:14px; }
+.bc-layout-marker-root.pos-bottom-left .bc-layout-marker-labels { right:14px; top:14px; }
+.bc-layout-marker-root.pos-bottom-right .bc-layout-marker-labels { left:14px; top:14px; }
+.bc-layout-marker-root.pos-top .bc-layout-leader,.bc-layout-marker-root.pos-bottom .bc-layout-leader { left:-.5px; width:1px; height:18px; }
+.bc-layout-marker-root.pos-top .bc-layout-leader { bottom:0; }.bc-layout-marker-root.pos-bottom .bc-layout-leader { top:0; }
+.bc-layout-marker-root.pos-left .bc-layout-leader,.bc-layout-marker-root.pos-right .bc-layout-leader { top:-.5px; width:18px; height:1px; }
+.bc-layout-marker-root.pos-left .bc-layout-leader { right:0; }.bc-layout-marker-root.pos-right .bc-layout-leader { left:0; }
+.bc-layout-marker-root.pos-top-left .bc-layout-leader,.bc-layout-marker-root.pos-bottom-right .bc-layout-leader { width:20px; height:1px; transform:rotate(45deg); }
+.bc-layout-marker-root.pos-top-right .bc-layout-leader,.bc-layout-marker-root.pos-bottom-left .bc-layout-leader { width:20px; height:1px; transform:rotate(-45deg); }
+.bc-layout-route-arrow { width:12px; height:12px; display:grid; place-items:center; background:transparent; filter:drop-shadow(0 0 1px #fff) drop-shadow(0 0 2px #fff); }
+.bc-layout-route-arrow i { width:0; height:0; display:block; border-top:4px solid transparent; border-bottom:4px solid transparent; border-left:7px solid #111; transform:rotate(var(--route-angle)); transform-origin:3px 4px; }
+.bc-layout-route-arrow.is-air { width:13px; height:13px; }
+.bc-layout-route-arrow.is-local { width:9px; height:9px; }
+.bc-layout-route-arrow.is-local i { border-top-width:3px; border-bottom-width:3px; border-left-width:5px; transform-origin:2px 3px; }
+.bc-layout-route-arrow.is-cruise { width:10px; height:10px; }
+.bc-layout-route-arrow.is-cruise i { border-top-width:3px; border-bottom-width:3px; border-left-width:6px; transform-origin:2.5px 3px; }
+.bc-layout-case-foot { display:grid; grid-template-columns:minmax(0,1fr) auto; align-items:center; gap:20px; margin-top:14px; }
+.bc-layout-day-rail { display:grid; grid-template-columns:repeat(var(--day-count,9),minmax(124px,1fr)); overflow-x:auto; border-top:1px solid #000; border-bottom:1px solid #000; scrollbar-width:none; }
+.bc-layout-day-rail button { min-width:124px; min-height:70px; display:flex; flex-direction:column; align-items:flex-start; justify-content:center; gap:3px; border:0; border-right:1px solid var(--lab-line); background:#fff; padding:11px 12px; color:#000; text-align:left; cursor:pointer; }
+.bc-layout-day-rail button:last-child { border-right:0; }
+.bc-layout-day-rail button b { font-size:14px; letter-spacing:.08em; }
+.bc-layout-day-rail button span { font-size:14px; font-weight:800; }
+.bc-layout-day-rail button.is-active,.bc-layout-day-rail button[aria-pressed="true"] { background:#000; color:#fff; }
+.bc-layout-selection { min-width:160px; margin:0; font-family:var(--serif); font-size:18px; font-weight:650; text-align:right; }
+
+@media (max-width:760px) {
+  .bc-layout-lab-hero { width:calc(100% - 24px); grid-template-columns:1fr; gap:20px; padding:54px 0 34px; }
+  .bc-layout-lab-hero h1 { font-size:48px; }
+  .bc-layout-lab-index { width:calc(100% - 24px); grid-template-columns:1fr; margin-bottom:50px; }
+  .bc-layout-lab-index a { min-height:56px; border-right:0; border-bottom:1px solid var(--lab-line); padding-inline:8px; }
+  .bc-layout-case { width:calc(100% - 24px); padding-bottom:72px; }
+  .bc-layout-case + .bc-layout-case { padding-top:54px; }
+  .bc-layout-case-head { grid-template-columns:1fr; gap:12px; }
+  .bc-layout-case-head h2 { font-size:39px; }
+  .bc-layout-pan-cue { display:block; margin:0 0 8px; font-size:14px; font-weight:850; letter-spacing:.02em; }
+  .bc-layout-map-frame { border-radius:20px; }
+  .bc-layout-map { height:500px; }
+  .bc-layout-case.is-long .bc-layout-map-frame { overflow-x:auto; overflow-y:hidden; scrollbar-width:thin; scrollbar-color:#111 #e8e8e4; }
+  .bc-layout-case.is-long .bc-layout-map { width:820px; max-width:none; height:560px; }
+  .bc-journey-map-scope .bc-layout-map { width:100%; height:100%; }
+  .bc-layout-case.is-long .bc-layout-map-status { right:auto; width:344px; }
+  .bc-layout-case.is-long .bc-layout-attribution { right:auto; width:344px; }
+  .bc-layout-map-status { top:10px; right:10px; left:10px; display:grid; grid-template-columns:1fr 1fr; gap:6px 12px; border-radius:14px; padding:10px 12px; font-size:14px; line-height:1.35; }
+  .bc-layout-map-status span:last-child { grid-column:1 / -1; border-top:1px solid rgba(0,0,0,.16); padding-top:6px; }
+  .bc-layout-attribution { right:9px; bottom:8px; left:9px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .bc-layout-marker-labels { gap:4px; }
+  .bc-layout-marker-labels button { width:36px; height:36px; min-width:36px; min-height:36px; flex-basis:36px; }
+  .bc-layout-marker-labels button b { width:34px; height:34px; font-size:14px; }
+  .bc-layout-marker-labels button span { display:none; }
+  .bc-layout-marker-labels button.is-compact { width:32px; height:32px; min-width:32px; min-height:32px; flex-basis:32px; }
+  .bc-layout-marker-labels button.is-compact b,
+  .bc-layout-marker-labels button.is-compact[aria-pressed="true"] b { width:30px; height:30px; font-size:14px; }
+  .bc-layout-case-foot { grid-template-columns:1fr; }
+  .bc-layout-day-rail { order:2; }
+  .bc-layout-selection { order:1; min-width:0; font-size:17px; text-align:left; }
+}

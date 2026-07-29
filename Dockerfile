@@ -76,6 +76,8 @@ WORKDIR /app
 
 # Copy built artefacts + pruned node_modules from builder
 COPY --from=builder /app/dist ./dist
+# 2026-07-29:客人面新站(整包靜態檔),由 server/_core/vite.ts 掛在舊 SPA 前面
+COPY --from=builder /app/storefront-2026 ./storefront-2026
 COPY --from=builder /app/node_modules ./node_modules
 COPY --from=builder /app/package.json ./package.json
 COPY --from=builder /app/drizzle ./drizzle

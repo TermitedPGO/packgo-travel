@@ -59,6 +59,36 @@ export async function setupVite(app: Express, server: Server) {
 }
 
 export function serveStatic(app: Express) {
+  // 2026-07-29:客人面換成新站(storefront-2026)。
+  //
+  // 新站是 2026-07-25 定案的設計,整包靜態檔。這裡把它掛在舊 SPA 前面:
+  //   - "/" 與新站自己的檔案(bc.js / bc.css / assets/...)由新站接
+  //   - 舊 SPA 的路由(/ops、/workspace、/login、/book、/payment、/china-visa …)
+  //     在新站目錄裡找不到對應檔案,會往下掉到舊的 static 與 SPA fallback
+  //   - /api 完全不受影響(它在更前面就被路由掉了)
+  //
+  // 這樣換前台不會動到後台、收款通知與任何 API。要退回舊前台只要拿掉這一段。
+  const storefrontPath =
+    process.env.NODE_ENV === "development"
+      ? path.resolve(import.meta.dirname, "../..", "storefront-2026")
+      : path.resolve(import.meta.dirname, "..", "storefront-2026");
+  if (fs.existsSync(storefrontPath)) {
+    app.use(
+      express.static(storefrontPath, {
+        index: ["index.html"],
+        maxAge: "1h",
+        setHeaders: (res, p) => {
+          if (p.endsWith(".html")) {
+            res.setHeader("Cache-Control", "public, max-age=0, must-revalidate");
+          }
+        },
+      }),
+    );
+    log.info({ storefrontPath }, "[storefront-2026] 新前台已掛載");
+  } else {
+    log.warn({ storefrontPath }, "[storefront-2026] 找不到新前台目錄,沿用舊前台");
+  }
+
   const distPath =
     process.env.NODE_ENV === "development"
       ? path.resolve(import.meta.dirname, "../..", "dist", "public")
