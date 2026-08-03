@@ -673,6 +673,86 @@ Pack & Go 的深度照顧是真差異,但缺一個低門檻高頻次的入口品
 5. **微信公眾號 / 朋友圈**(若有)。
 6. **Yelp 13 則評論全文** — 看負評找弱點。優先序最低。
 
+### 7.0 ARC / IATAN 查核結果:查不到(Jeff 2026-08-03 指派)
+
+**結論:本 session 無法取得,不是「他們沒有」,是我查不到。**
+
+嘗試過的路徑與結果:
+
+| 路徑 | 結果 |
+|------|------|
+| iatan.org 代理商名錄 | 網路政策全封,`curl` 回 `http=000` |
+| sotas.doj.ca.gov(加州司法部 SOT 查詢) | 同上,`http=000` |
+| 搜尋引擎(四種關鍵字組合) | 完全沒有回傳任何 ARC / IATAN / CST 號碼 |
+| 他們自己的官網、黃頁、臉書、IG 摘要 | 未見任何認證號碼或會員標示 |
+| Jeff 提供的六張廣告原圖 | **未見 CST 號碼**(但見下方但書) |
+
+#### 一個需要 Jeff 親自確認的觀察
+
+加州 Business & Professions Code **§17550.24** 規定:
+
+> 「The registration number of the seller of travel shall be **clearly and
+> conspicuously displayed on all advertising materials** offering for sale or
+> soliciting the purchase of any air or sea transportation or travel services,
+> including, but not limited to, any writings, or promotional materials of any kind.」
+
+即:賣機票或海運相關旅遊服務的廣告,**必須清楚顯著地標示 CST 註冊號碼**。
+
+我在 Jeff 提供的六張廣告(東京春/秋、大阪京都、東京迪士尼、北海道、清邁、
+SFO 純機票)上**都沒有看到 CST 號碼**。頁尾只有公司名、電話、email、
+LINE ID、FB/IG、三個 QR code 與著作權聲明。
+
+**但書(重要,不要跳過)**:那些是壓縮過的截圖,最小字級的說明欄我讀不清楚。
+「我沒看到」不等於「上面沒有」。**這一條在 Jeff 用原圖或原檔逐字確認之前,
+不得當成事實引用。**
+
+#### 建議的處理方式:不要拿這個攻擊對手
+
+即使確認屬實,拿同業的法遵瑕疵當行銷武器,風險遠大於報酬:
+容易反噬、顯得小氣、而且會把競爭拉到 Pack & Go 不想去的地方。
+
+**正確用法是反過來 — 把自己的合規做得顯眼。**
+
+Pack & Go 已具備且可查證的:CST #2166984-40、TCRF 參與、
+Newark 商業執照 #115594。這些本來就該出現在每一份對外文件上,
+現在有了額外理由:那是對手(可能)沒做的事,而長輩客群正好最吃這一套。
+
+**行動**:確認 packgo-poster skill 的頁尾模板、報價單、收據、網站,
+CST 號碼是否都有且顯著。這同時是自我法遵檢查 — §17550.24 一樣適用於 Pack & Go。
+
+#### 自我檢查結果:packgo-flight-ticket 沒有 CST 號碼
+
+順手把四個對客文件模板掃了一遍:
+
+| Skill / 模板 | CST 號碼 | 位置 |
+|---|---|---|
+| packgo-quote(報價單) | ✅ 有 | `references/template.html:400` |
+| packgo-poster(海報,本批新建) | ✅ 有 | `references/template.html:381` |
+| packgo-deposit-receipt(訂金收據) | ✅ 有 | `SKILL.md:16`、公司資訊欄 |
+| **packgo-flight-ticket(機票 PDF)** | ❌ **完全沒有** | 全檔搜不到 CST 或 2166984 |
+
+**這一項比對手的狀態更要緊,因為它是我方的。**
+
+而且諷刺的是,機票正是 §17550.24 最直接涵蓋的品項
+(「offering for sale or soliciting the purchase of any **air** …
+transportation or travel services」)。四份文件裡唯一漏掉 CST 的,
+偏偏是唯一純空運的那一份。
+
+**但不要直接當成違規結論**:給既有客人看的航班比較 PDF,是否構成條文所指的
+「advertising materials offering for sale or soliciting the purchase」,
+是法律判斷,不是我能裁的。**列入問律師清單。**
+
+不論法律怎麼認定,**把 CST、TCRF、Newark 執照補進 packgo-flight-ticket 的頁尾
+都是零成本且只有好處**:合規更穩,而且那正是 §7.0 想主打的信任訊號。
+建議與其他三份模板的頁尾統一。
+
+#### Jeff 五分鐘可完成的查核
+
+1. `https://sotas.doj.ca.gov/sellerSearch.action` 搜 "E Star Travel" 或
+   "E-Star Travel" → 拿到 CST 號碼、狀態、TCRF 參與與否
+2. `iatan.org` 代理商名錄搜公司名 / Milpitas / Fremont
+3. 把六張廣告的原檔放大,逐張確認頁尾有沒有 CST 號碼
+
 ### 7.1 五分鐘就能查、但可能決定勝負的一項
 
 **E Star 的 CST 登記狀態與 TCRF 參與與否。**
