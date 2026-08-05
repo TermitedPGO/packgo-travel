@@ -32,8 +32,9 @@
  *   <out>/uv-lang-compare.json   原始逐欄位資料(給後續判讀/存證)
  */
 
-import { writeFileSync, mkdirSync } from "node:fs";
+import { writeFileSync, mkdirSync, realpathSync } from "node:fs";
 import { join, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 
 /* ─────────────────────────── SOA2 客戶端(內聯) ───────────────────────────
  * 刻意不 import server/suppliers/uvClient.ts:那支寫死英文,而且會把 DB 相依
@@ -579,10 +580,35 @@ export {
   TRADITIONAL_ONLY,
 };
 
-const isDirectRun =
-  process.argv[1] && import.meta.url === `file://${resolve(process.argv[1])}`;
+/**
+ * 判斷本檔是否被「直接執行」(而非被測試 import)。
+ *
+ * ⚠ 別退回字串比對 `import.meta.url === "file://" + resolve(argv[1])`。
+ * 那寫法在真實環境有兩個獨立破法,兩個都會讓 main() 靜默不執行 —— 程式
+ * 印不出任何東西、退出碼 0,看起來像「跑完了但沒結果」,最難查的失敗:
+ *
+ *   1. 路徑含非 ASCII(本專案 repo 就在 ~/dev/網站):import.meta.url 會把
+ *      中文百分號編碼成 %E7%B6%B2%E7%AB%99,手拼的字串是原樣中文,永不相等。
+ *   2. 路徑經符號連結(macOS 的 /tmp → /private/tmp):Node 載入主模組時解析
+ *      真實路徑,import.meta.url 是 /private/tmp/…,argv[1] 是 /tmp/…。
+ *
+ * 正解:兩邊都轉成真實檔案路徑再比 —— fileURLToPath 負責解碼百分號編碼,
+ * realpathSync 負責解開符號連結。回歸鎖見 uv-lang-compare.test.mjs 的
+ * 「直接執行」段(用子行程從中文路徑與符號連結各跑一次)。
+ */
+function isDirectRun() {
+  if (!process.argv[1]) return false;
+  try {
+    return (
+      realpathSync(fileURLToPath(import.meta.url)) ===
+      realpathSync(resolve(process.argv[1]))
+    );
+  } catch {
+    return false;
+  }
+}
 
-if (isDirectRun) {
+if (isDirectRun()) {
   main().catch((err) => {
     console.error("\n失敗:", err?.message ?? err);
     process.exitCode = 1;

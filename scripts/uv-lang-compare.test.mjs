@@ -12,6 +12,11 @@
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { execFileSync } from "node:child_process";
+import { mkdtempSync, mkdirSync, writeFileSync, copyFileSync, symlinkSync, readFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join, dirname } from "node:path";
+import { fileURLToPath } from "node:url";
 
 import {
   analyzeText,
@@ -274,4 +279,96 @@ test("parseArgs:預設與覆寫", () => {
   // 無效值退回預設,不產生 NaN
   assert.equal(parseArgs(["node", "s", "--count=abc"]).count, 10);
   assert.equal(parseArgs(["node", "s", "--count=0"]).count, 1);
+});
+
+/* ───────────────────── 直接執行(isDirectRun 回歸鎖) ─────────────────────
+ * 2026-08-04 實機事故:Jeff 兩次執行都「零輸出、零錯誤、退出碼 0」,因為
+ * 初版守衛用字串比對 import.meta.url 與 resolve(argv[1]),在兩種真實路徑
+ * 下永遠不相等,main() 靜默不執行:
+ *   1. 路徑含非 ASCII(repo 就在 ~/dev/網站)→ import.meta.url 百分號編碼
+ *   2. 路徑經符號連結(macOS /tmp → /private/tmp)→ Node 解析真實路徑
+ *
+ * 單元測試驗不到這個 —— 必須真的用子行程從那兩種路徑跑一次。所以以下用
+ * spawn,並以 stub fetch 讓它不依賴外網、跑得快且結果固定。
+ */
+
+const THIS_DIR = dirname(fileURLToPath(import.meta.url));
+const SCRIPT = join(THIS_DIR, "uv-lang-compare.mjs");
+
+/** 假供應商:讓腳本完整跑完而不碰網路。 */
+const STUB_SRC = `
+const envelope = (responseData) => ({
+  ResponseStatus: { Ack: "Success", Errors: [] },
+  responseResult: { code: 200, msg: "ok", msgCode: "" },
+  responseData,
+});
+globalThis.fetch = async (url, init) => {
+  const lang = init?.headers?.languageCode;
+  const name = lang === "2" ? "美西七日遊" : "US West 7 Days";
+  let data;
+  if (url.includes("getProductMain")) data = envelope({ productCode: "P1", productName: name });
+  else if (url.includes("getProductTravelDetail")) data = envelope({ productTravel: {}, productNotice: {}, productCost: {} });
+  else data = envelope({});
+  return { ok: true, status: 200, json: async () => data };
+};
+`;
+
+/** 從指定路徑跑腳本,回傳 stdout。exitCode 非 0 會拋。 */
+function runScriptAt(scriptPath, outDir, cwd) {
+  const stub = join(dirname(scriptPath), "stub.mjs");
+  writeFileSync(stub, STUB_SRC);
+  return execFileSync(
+    process.execPath,
+    ["--import", pathToFileUrlString(stub), scriptPath, "--codes=P1", `--out=${outDir}`],
+    { cwd, encoding: "utf8", timeout: 60_000 }
+  );
+}
+
+/** --import 需要 file:// URL;路徑含非 ASCII 時必須正確編碼。 */
+function pathToFileUrlString(p) {
+  return new URL(`file://${p.split("/").map(encodeURIComponent).join("/")}`).href;
+}
+
+test("直接執行:路徑含非 ASCII(中文)仍要執行 main", () => {
+  const base = mkdtempSync(join(tmpdir(), "uvlang-"));
+  const dir = join(base, "網站專案");           // ← 重現 ~/dev/網站
+  mkdirSync(dir, { recursive: true });
+  const copied = join(dir, "uv-lang-compare.mjs");
+  copyFileSync(SCRIPT, copied);
+  const outDir = join(base, "out-cjk");
+
+  const stdout = runScriptAt(copied, outDir, base);
+
+  assert.match(stdout, /縱橫 \(UV\) 語言對照抽樣/, "main() 必須執行並印出標頭");
+  assert.match(stdout, /總結/, "必須跑到總結");
+  const html = readFileSync(join(outDir, "uv-lang-compare.html"), "utf8");
+  assert.match(html, /美西七日遊/, "報告要含繁中欄位");
+});
+
+test("直接執行:路徑經符號連結仍要執行 main", () => {
+  const base = mkdtempSync(join(tmpdir(), "uvlang-"));
+  const real = join(base, "real");
+  mkdirSync(real, { recursive: true });
+  const copied = join(real, "uv-lang-compare.mjs");
+  copyFileSync(SCRIPT, copied);
+
+  const link = join(base, "linked.mjs");
+  symlinkSync(copied, link);                    // ← 重現 /tmp → /private/tmp
+  const outDir = join(base, "out-link");
+
+  const stdout = runScriptAt(copied, outDir, base);
+  assert.match(stdout, /縱橫 \(UV\) 語言對照抽樣/, "副本本身要能跑");
+
+  const viaLink = execFileSync(
+    process.execPath,
+    [
+      "--import",
+      pathToFileUrlString(join(real, "stub.mjs")),
+      link,
+      "--codes=P1",
+      `--out=${join(base, "out-link2")}`,
+    ],
+    { cwd: base, encoding: "utf8", timeout: 60_000 }
+  );
+  assert.match(viaLink, /縱橫 \(UV\) 語言對照抽樣/, "經符號連結執行也必須跑 main");
 });
