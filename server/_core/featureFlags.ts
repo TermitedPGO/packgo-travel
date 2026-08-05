@@ -207,3 +207,76 @@ export const storefrontMode = (): boolean => {
   const v = process.env.STOREFRONT_MODE;
   return v === "1" || v === "true";
 };
+
+/* ─────────────────── 供應商匯入語言(feature: supplier-import-language) ─────────────────── */
+
+/**
+ * 縱橫(UV / Universal Vision, Ctrip SOA2)向供應商索取內容時使用的語言。
+ *
+ * 為什麼需要這個設定(2026-08-04 根因,三段皆第一手證據):
+ *   1. `server/suppliers/uvClient.ts` 原本四處把語言寫死成 `3`(英文),
+ *      當初照 UV 前台預設值抄(原註解:「UV storefront defaults to English」)。
+ *   2. `supplierSync/hydration.ts` 是零 LLM 的純轉換,供應商給的字原封不動
+ *      寫進 `tours` 對客欄位 —— 中間沒有任何翻譯步驟。
+ *   3. `translations.sourceLanguage` 預設 `"zh-TW"`,系統設計本就假設 tours
+ *      存繁中、英文是翻出去的目標語。
+ *   1+2 讓英文原文直接落在客人頁上,3 說明那還把翻譯方向做反了。
+ *
+ * 預設繁中的依據不是猜測:2026-08-04 以 `scripts/uv-lang-compare.mjs` 實測
+ * 10 團 46 欄,繁中命中 93.5%、英文殘留 0%、簡體 0 欄,且 en 與 zh-TW 逐區塊
+ * 欄位數 0/10 團不一致(中文版沒有少回傳內容)。
+ *
+ * ⚠ 非法值(未設 / 空字串 / 拼錯 / 不支援的語言)一律退回**繁中**,不退回英文。
+ *   退回英文等於靜默重蹈覆轍,正是本設定要根除的失敗模式;拋錯則讓一個手打
+ *   錯誤的 secret 弄垮整條 sync,對「只影響顯示語言」的設定過當。失敗要落在
+ *   我們要的語言,不是我們不要的語言。
+ *
+ * 環境變數用可讀語言標籤而非 UV 的數字碼:數字碼是供應商內部約定,寫在 Fly
+ * secret 裡沒有人看得懂,且與本站 i18n 的 `zh-TW` / `en` 命名衝突。對映收在
+ * 本檔內部。
+ *
+ * 與本檔其他 flag 同樣是 boot 時讀取、無快取、改動需重新部署 —— 正是我們要的
+ * 語義,語言不該在一次 sync 跑到一半時翻轉。
+ *
+ * Env: `UV_IMPORT_LANGUAGE=zh-TW | zh-CN | en`(預設 `zh-TW`)
+ */
+export type UvLanguage = {
+  /** UV header `languageCode`(字串形式) */
+  code: "1" | "2" | "3";
+  /** UV request body `productLanguage`(數字形式) */
+  num: 1 | 2 | 3;
+  /** 可讀語言標籤,與本站 i18n 命名一致 */
+  tag: "zh-CN" | "zh-TW" | "en";
+  /** HTTP `Accept-Language` */
+  acceptLanguage: string;
+};
+
+/**
+ * 語言對映表。鍵為正規化後(小寫)的環境變數值。
+ * `num` 刻意不在此手打,而是由 `code` 衍生(見 `toUvLanguage`)—— 兩者若能
+ * 各自獨立設定,就有寫成不同語言而無人察覺的空間。
+ */
+const UV_LANGUAGE_TABLE = {
+  "zh-cn": { code: "1", tag: "zh-CN", acceptLanguage: "zh-CN,zh;q=0.9" },
+  "zh-tw": { code: "2", tag: "zh-TW", acceptLanguage: "zh-TW,zh;q=0.9" },
+  en: { code: "3", tag: "en", acceptLanguage: "en-US,en;q=0.9" },
+} as const;
+
+type UvLanguageEntry = (typeof UV_LANGUAGE_TABLE)[keyof typeof UV_LANGUAGE_TABLE];
+
+const toUvLanguage = (entry: UvLanguageEntry): UvLanguage => ({
+  code: entry.code,
+  num: Number(entry.code) as 1 | 2 | 3,
+  tag: entry.tag,
+  acceptLanguage: entry.acceptLanguage,
+});
+
+/** 非法/未設時的落點。繁中,不是英文 —— 理由見上方 JSDoc。 */
+export const UV_IMPORT_LANGUAGE_DEFAULT_TAG = "zh-TW" as const;
+
+export const uvImportLanguage = (): UvLanguage => {
+  const raw = process.env.UV_IMPORT_LANGUAGE;
+  const key = typeof raw === "string" ? raw.trim().toLowerCase() : "";
+  const entry = (UV_LANGUAGE_TABLE as Record<string, UvLanguageEntry | undefined>)[key];
+  return toUvLanguage(entry ?? UV_LANGUAGE_TABLE["zh-tw"]);
+};

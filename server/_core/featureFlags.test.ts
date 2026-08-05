@@ -14,6 +14,7 @@ import {
   trustAutomatchAmountWindowUsd,
   trustAutomatchDateWindowDays,
   trustEarlyRecognitionWindowDays,
+  uvImportLanguage,
 } from "./featureFlags";
 
 const ENV_KEYS = [
@@ -133,5 +134,74 @@ describe("storefrontMode — storefront-split Phase 0 role flag", () => {
       process.env.STOREFRONT_MODE = v;
       expect(storefrontMode()).toBe(false);
     }
+  });
+});
+
+/* ─────────── uvImportLanguage(feature: supplier-import-language) ─────────── */
+
+describe("uvImportLanguage — 供應商匯入語言(預設繁中)", () => {
+  const KEY = "UV_IMPORT_LANGUAGE";
+  const original = process.env[KEY];
+  afterEach(() => {
+    if (original === undefined) delete process.env[KEY];
+    else process.env[KEY] = original;
+  });
+
+  it("未設定 → zh-TW(2)。預設繁中是本 feature 的主要交付物", () => {
+    delete process.env[KEY];
+    const lang = uvImportLanguage();
+    expect(lang.tag).toBe("zh-TW");
+    expect(lang.code).toBe("2");
+    expect(lang.num).toBe(2);
+  });
+
+  it("三個合法值各自對映正確的 UV 語言碼", () => {
+    const cases = [
+      ["zh-CN", "1", 1],
+      ["zh-TW", "2", 2],
+      ["en", "3", 3],
+    ] as const;
+    for (const [tag, code, num] of cases) {
+      process.env[KEY] = tag;
+      const lang = uvImportLanguage();
+      expect(lang.tag).toBe(tag);
+      expect(lang.code).toBe(code);
+      expect(lang.num).toBe(num);
+    }
+  });
+
+  it("不變量:code 與 num 恆為同一語言(對映若能分家就會拿到別的語言且不報錯)", () => {
+    for (const v of ["zh-CN", "zh-TW", "en", "亂打", undefined]) {
+      if (v === undefined) delete process.env[KEY];
+      else process.env[KEY] = v;
+      const lang = uvImportLanguage();
+      expect(lang.num).toBe(Number(lang.code));
+    }
+  });
+
+  it("正規化:大小寫與前後空白皆命中(Fly secret 是手打的)", () => {
+    for (const v of ["zh-tw", " zh-TW ", "ZH-TW", "\tZh-Tw\n"]) {
+      process.env[KEY] = v;
+      expect(uvImportLanguage().tag).toBe("zh-TW");
+    }
+  });
+
+  it("非法值退回繁中,且明確不等於英文 —— 退回英文即靜默重蹈覆轍", () => {
+    for (const v of ["", "   ", "zh", "japanese", "2", "3", "true", "EN-GB", "zh_TW"]) {
+      process.env[KEY] = v;
+      const lang = uvImportLanguage();
+      expect(lang.tag).toBe("zh-TW");
+      expect(lang.tag).not.toBe("en");
+      expect(lang.code).not.toBe("3");
+    }
+  });
+
+  it("Accept-Language 與 tag 同語言", () => {
+    process.env[KEY] = "en";
+    expect(uvImportLanguage().acceptLanguage).toMatch(/^en/);
+    process.env[KEY] = "zh-TW";
+    expect(uvImportLanguage().acceptLanguage).toMatch(/^zh-TW/);
+    process.env[KEY] = "zh-CN";
+    expect(uvImportLanguage().acceptLanguage).toMatch(/^zh-CN/);
   });
 });
