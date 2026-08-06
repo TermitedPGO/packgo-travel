@@ -28,6 +28,7 @@
  */
 
 import { SupplierApiError } from "./types";
+import { uvImportLanguage, type UvLanguage } from "../_core/featureFlags";
 
 const SOA2_BASE = "https://online.ctrip.com/restapi/soa2";
 
@@ -43,18 +44,33 @@ const GUEST_USER = {
   systemCode: 0,
 };
 
-const COMMON_HEADERS = {
-  "Content-Type": "application/json",
-  branchcode: UV_BRANCH_CODE,
-  languageCode: "3", // 1=zh-CN, 2=zh-TW, 3=en. UV storefront defaults to English.
-  "X-Requested-With": "XMLHttpRequest",
-  Origin: "https://uvbookings.toursbms.com",
-  Referer: "https://uvbookings.toursbms.com/",
-  "User-Agent":
-    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36",
-  Accept: "application/json, text/plain, */*",
-  "Accept-Language": "en-US,en;q=0.9,zh-TW;q=0.8",
-};
+/**
+ * 每次請求組一份 headers。
+ *
+ * 這裡原本是模組層級常數,`languageCode` 寫死 `"3"`(英文),註解寫著
+ * 「UV storefront defaults to English」—— 當初照供應商前台預設值抄下來。
+ * 後果不只是「名錄是英文」:`supplierSync/hydration.ts` 是零 LLM 的純轉換,
+ * 供應商給的英文字會原封不動寫進 `tours` 對客欄位,客人頁就長出英文原文。
+ * 歷史裁定不美化 —— 記在這裡是為了讓下一個人看得懂為什麼改成函式。
+ *
+ * 改成函式(而非常數)是因為語言要在**請求時**決定,不能在模組載入時凍結。
+ * 語言來自 `featureFlags.uvImportLanguage()`,預設繁中;該檔為 boot 時讀取、
+ * 無快取,所以這裡不需要另外做快取。
+ */
+function commonHeaders(lang: UvLanguage) {
+  return {
+    "Content-Type": "application/json",
+    branchcode: UV_BRANCH_CODE,
+    languageCode: lang.code,
+    "X-Requested-With": "XMLHttpRequest",
+    Origin: "https://uvbookings.toursbms.com",
+    Referer: "https://uvbookings.toursbms.com/",
+    "User-Agent":
+      "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36",
+    Accept: "application/json, text/plain, */*",
+    "Accept-Language": lang.acceptLanguage,
+  };
+}
 
 // 2026-05-16: same bump rationale as lionClient.ts — Ctrip SOA2's
 // gateway gives sub-second responses warm but can stall past 15s when
@@ -89,18 +105,34 @@ interface SoaResponse<T> {
   responseData: T;
 }
 
+/**
+ * 語言由本函式統一注入 header 與 body,呼叫點不再各自帶 `productLanguage`。
+ *
+ * 這是刻意的結構性保證:UV 的語言要同時出現在 header(`languageCode`)與
+ * body(`productLanguage`),兩者若能各自設定,就有「header 說中文、body 說
+ * 英文」而無人察覺的空間。兩者同源於一次 `uvImportLanguage()`,不可能不一致。
+ *
+ * 因此 `productLanguage` 放在 `...body` **之後**:語言是傳輸層的事,由本函式
+ * 擁有,不是可以從 body 夾帶進來的每次呼叫參數。日後若真有單次指定語言的需求,
+ * 請加一個明確的 opts 參數,不要從 body 偷渡。
+ */
 async function callSoa<T>(
   serviceId: number,
   endpoint: string,
   body: Record<string, unknown>
 ): Promise<T> {
   const url = `${SOA2_BASE}/${serviceId}/${endpoint}.json`;
+  const lang = uvImportLanguage();
   let resp: Response;
   try {
     resp = await fetchWithTimeout(url, {
       method: "POST",
-      headers: COMMON_HEADERS,
-      body: JSON.stringify({ requestUser: GUEST_USER, ...body }),
+      headers: commonHeaders(lang),
+      body: JSON.stringify({
+        requestUser: GUEST_USER,
+        ...body,
+        productLanguage: lang.num,
+      }),
     });
   } catch (err) {
     throw new SupplierApiError("uv", `${serviceId}/${endpoint}`, "network error", err);
@@ -162,7 +194,7 @@ export async function listProducts(
     keywords: input.keywords ?? "",
     currencyCode: "CI00000002", // USD
     productOrderBy: 1, // default
-    productLanguage: 3, // English
+    // productLanguage 由 callSoa 統一注入(與 header languageCode 同源)
     status: 200, // active
     pager: { pageIndex: input.page, pageSize: input.pageSize },
     departCountryCode: "",
@@ -199,10 +231,8 @@ export interface UvProductMain {
 }
 
 export async function getProductMain(productCode: string): Promise<UvProductMain> {
-  return callSoa<UvProductMain>(17626, "getProductMain", {
-    productCode,
-    productLanguage: 3,
-  });
+  // productLanguage 由 callSoa 統一注入(與 header languageCode 同源)
+  return callSoa<UvProductMain>(17626, "getProductMain", { productCode });
 }
 
 export interface UvProductTravelDetail {
@@ -216,9 +246,9 @@ export interface UvProductTravelDetail {
 export async function getProductTravelDetail(
   productCode: string
 ): Promise<UvProductTravelDetail> {
+  // productLanguage 由 callSoa 統一注入(與 header languageCode 同源)
   return callSoa<UvProductTravelDetail>(17626, "getProductTravelDetail", {
     productCode,
-    productLanguage: 3,
   });
 }
 
