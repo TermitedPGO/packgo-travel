@@ -1,0 +1,427 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+<meta charset="UTF-8">
+<title>Pack &amp; Go 海報</title>
+<style>
+/* ==========================================================================
+   Pack & Go 海報模板
+   --------------------------------------------------------------------------
+   尺寸由 scripts/render.mjs 用 --size 注入 --poster-w / --poster-h,這裡的值
+   只是「直接用瀏覽器開來看」時的預設(朋友圈 4:5)。不要在這裡寫死尺寸。
+
+   所有長度都用 --u 換算(--u = 畫布寬 / 1080),所以 1080 寬設計稿的數字可以
+   直接抄進來,換到 A4 或限時動態不必重排。
+
+   紅線 6:所有看得見的元素都要圓角,唯一例外是全寬 hero 背景圖。
+   ========================================================================== */
+:root {
+  --poster-w: 1080px;
+  --poster-h: 1350px;
+  --u: calc(var(--poster-w) / 1080);
+
+  --navy: #1B2A4A;
+  --navy-deep: #121D33;
+  --gold: #C9A96E;
+  --accent: #3A6B8C;
+  --dark-text: #2C2C2C;
+  --mid-text: #555555;
+  --light-bg: #F9F7F2;
+  --line-color: #D4C5A0;
+}
+
+* { margin: 0; padding: 0; box-sizing: border-box; }
+
+html, body {
+  width: var(--poster-w);
+  height: var(--poster-h);
+  background: transparent;
+}
+
+body {
+  font-family: 'PingFang TC', 'Noto Sans CJK TC', 'Noto Sans TC',
+               'Hiragino Sans CNS', 'Microsoft JhengHei', 'WenQuanYi Zen Hei', sans-serif;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: geometricPrecision;
+}
+
+.poster {
+  width: var(--poster-w);
+  height: var(--poster-h);
+  display: flex;
+  flex-direction: column;
+  background: var(--light-bg);
+  overflow: hidden;
+  position: relative;
+}
+
+/* ---------- HERO(唯一允許直角的區塊:全寬背景圖) ----------
+   hero 是版面裡「會伸縮」的那一塊:內文短它就長,內文長它就縮。
+   內文與頁尾都是 flex:0 0 auto,照自己需要的高度長,所以價格卡永遠不會被壓掉。 */
+.hero {
+  position: relative;
+  /* grow:1 → 內容短時吸收剩餘空間(照片放大);shrink:0 → 絕不壓縮到切掉主標。
+     真的塞不下時交給頁尾底邊偵測 + autoFit 整體縮排,而不是默默切字。 */
+  flex: 1 0 auto;
+  min-height: 32%;
+  /* 換成客人要的圖:background-image: url('hero.jpg');
+     紅線:只能用 Pack & Go 自有照片或已授權圖庫,供應商的宣傳圖一律不得使用。
+     沒圖時就留下面這個漸層,不要放來路不明的圖。 */
+  background: linear-gradient(140deg, #24406B 0%, #1B2A4A 55%, #121D33 100%);
+  background-size: cover;
+  background-position: center;
+
+  /* 用 flex 排,不用絕對定位:hero 被壓矮時(方形版)logo 與主標才不會疊在一起 */
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  gap: calc(20 * var(--u));
+  padding: calc(38 * var(--u)) calc(48 * var(--u)) calc(44 * var(--u));
+}
+
+/* 底部壓深,讓白字在任何照片上都讀得到 */
+.hero::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(to bottom,
+    rgba(18,29,51,0.10) 0%,
+    rgba(18,29,51,0.20) 42%,
+    rgba(18,29,51,0.82) 100%);
+}
+
+.hero-top {
+  position: relative;
+  z-index: 2;
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.hero-logo { height: calc(64 * var(--u)); width: auto; display: block; }
+
+/* 團型徽章 */
+.badge {
+  background: var(--gold);
+  color: var(--navy-deep);
+  font-size: calc(24 * var(--u));
+  font-weight: 700;
+  letter-spacing: calc(1.5 * var(--u));
+  padding: calc(10 * var(--u)) calc(24 * var(--u));
+  border-radius: calc(999 * var(--u));
+}
+
+.hero-text {
+  position: relative;
+  z-index: 2;
+  flex: 0 0 auto;
+}
+
+/* 眉標:目的地 / 系列名 */
+.eyebrow {
+  display: inline-block;
+  color: var(--gold);
+  font-size: calc(28 * var(--u));
+  font-weight: 600;
+  letter-spacing: calc(4 * var(--u));
+  margin-bottom: calc(14 * var(--u));
+}
+
+/* 主標:海報上最大的字。控制在 14 字內,兩行以內。 */
+.headline {
+  color: #FFFFFF;
+  font-size: calc(78 * var(--u));
+  font-weight: 800;
+  line-height: 1.18;
+  letter-spacing: calc(1 * var(--u));
+  text-shadow: 0 calc(2 * var(--u)) calc(16 * var(--u)) rgba(0,0,0,0.35);
+}
+
+/* ---------- 內文 ---------- */
+.body {
+  flex: 0 0 auto;
+  padding: calc(38 * var(--u)) calc(48 * var(--u)) 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.subhead {
+  color: var(--mid-text);
+  font-size: calc(31 * var(--u));
+  line-height: 1.5;
+  margin-bottom: calc(30 * var(--u));
+}
+
+/* 賣點:3-4 條,每條一行講完,不要換行 */
+.highlights {
+  list-style: none;
+  margin-bottom: calc(32 * var(--u));
+}
+
+.highlights li {
+  display: flex;
+  align-items: baseline;
+  gap: calc(16 * var(--u));
+  color: var(--dark-text);
+  font-size: calc(32 * var(--u));
+  font-weight: 500;
+  line-height: 1.42;
+  padding: calc(9 * var(--u)) 0;
+}
+
+.highlights li::before {
+  content: '◆';
+  color: var(--gold);
+  font-size: calc(22 * var(--u));
+  flex: 0 0 auto;
+}
+
+/* ---------- 價格卡 ---------- */
+.price-card {
+  border: calc(2 * var(--u)) solid var(--gold);
+  border-radius: calc(18 * var(--u));
+  background: #FFFFFF;
+  padding: calc(26 * var(--u)) calc(32 * var(--u));
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: calc(24 * var(--u));
+}
+
+.price-label {
+  color: var(--mid-text);
+  font-size: calc(26 * var(--u));
+  margin-bottom: calc(6 * var(--u));
+}
+
+/* 只放最終售價。供應商成本、底價、利潤絕不出現在這裡(紅線 2)。 */
+.price-value {
+  color: var(--accent);
+  font-size: calc(86 * var(--u));
+  font-weight: 800;
+  line-height: 1;
+  letter-spacing: calc(-1 * var(--u));
+}
+
+.price-value .unit {
+  font-size: calc(34 * var(--u));
+  font-weight: 600;
+  letter-spacing: 0;
+}
+
+.price-note {
+  color: var(--mid-text);
+  font-size: calc(22 * var(--u));
+  margin-top: calc(8 * var(--u));
+}
+
+/* 出發日 / 名額:只寫真的,沒有的欄位整塊刪掉 */
+.departure {
+  text-align: right;
+  flex: 0 0 auto;
+}
+
+.departure-label {
+  color: var(--mid-text);
+  font-size: calc(24 * var(--u));
+  margin-bottom: calc(6 * var(--u));
+}
+
+.departure-value {
+  color: var(--navy);
+  font-size: calc(38 * var(--u));
+  font-weight: 700;
+  line-height: 1.25;
+}
+
+.seats {
+  display: inline-block;
+  margin-top: calc(10 * var(--u));
+  background: var(--light-bg);
+  border: calc(1.5 * var(--u)) solid var(--line-color);
+  border-radius: calc(999 * var(--u));
+  color: var(--navy);
+  font-size: calc(23 * var(--u));
+  font-weight: 600;
+  padding: calc(6 * var(--u)) calc(18 * var(--u));
+}
+
+/* ---------- 頁尾 ---------- */
+.footer {
+  flex: 0 0 auto;
+  margin: calc(34 * var(--u)) calc(48 * var(--u)) calc(40 * var(--u));
+  background: var(--navy);
+  border-radius: calc(18 * var(--u));
+  padding: calc(26 * var(--u)) calc(32 * var(--u));
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: calc(20 * var(--u));
+}
+
+.contact-rows { display: flex; flex-direction: column; gap: calc(9 * var(--u)); }
+
+.contact-row {
+  display: flex;
+  align-items: center;
+  gap: calc(12 * var(--u));
+  color: #FFFFFF;
+  font-size: calc(28 * var(--u));
+  font-weight: 600;
+  line-height: 1.2;
+}
+
+.contact-row .k {
+  color: var(--gold);
+  font-size: calc(23 * var(--u));
+  font-weight: 700;
+  min-width: calc(96 * var(--u));
+}
+
+.legal {
+  text-align: right;
+  color: rgba(255,255,255,0.72);
+  font-size: calc(21 * var(--u));
+  line-height: 1.5;
+}
+
+.legal strong {
+  display: block;
+  color: #FFFFFF;
+  font-size: calc(25 * var(--u));
+  font-weight: 700;
+  margin-bottom: calc(4 * var(--u));
+}
+
+/* ---------- 版型微調 ----------
+   同一份 HTML 出不同尺寸時,只調 hero 下限與標題級數,內容一個字都不動。 */
+@media (max-aspect-ratio: 9/16) {   /* 限時動態 1080x1920,直得多,hero 可以更大 */
+  .hero { min-height: 45%; }
+  .headline { font-size: calc(84 * var(--u)); }
+}
+@media (min-aspect-ratio: 1/1) {    /* 方形或更寬,垂直空間吃緊,全面收斂 */
+  .hero { min-height: 26%; }
+  .headline { font-size: calc(64 * var(--u)); }
+  .subhead { font-size: calc(29 * var(--u)); margin-bottom: calc(20 * var(--u)); }
+  .highlights { margin-bottom: calc(22 * var(--u)); }
+  .highlights li { padding: calc(4 * var(--u)) 0; font-size: calc(28 * var(--u)); }
+  .price-value { font-size: calc(72 * var(--u)); }
+  .footer { margin-top: calc(24 * var(--u)); margin-bottom: calc(30 * var(--u)); }
+}
+
+/* 內容真的塞不下時的最後一道防線:出圖時直接畫紅色警示條,
+   寧可醜到不可能誤發,也不要靜靜裁掉價格或聯絡方式。 */
+.overflow-warning {
+  position: absolute;
+  left: 0; right: 0; bottom: 0;
+  z-index: 99;
+  background: #C0392B;
+  color: #FFFFFF;
+  font-size: calc(26 * var(--u));
+  font-weight: 700;
+  text-align: center;
+  padding: calc(14 * var(--u));
+}
+</style>
+</head>
+<body>
+
+<!-- ==========================================================================
+     以下全部是佔位內容,出稿前逐項換掉。留著沒換的假資料出街 = 事故。
+     沒有的欄位就整塊刪掉,不要填「暫定」「待確認」。
+     ========================================================================== -->
+<div class="poster">
+
+  <div class="hero">
+    <div class="hero-top">
+      <!-- logo:render.mjs 會把 assets/packgo-logo-white.png 複製到同層;
+           也可以改成 data:image/png;base64,<assets/packgo-logo-white_b64.txt 內容> -->
+      <img class="hero-logo" src="packgo-logo-white.png" alt="Pack &amp; Go">
+      <div class="badge">15 人小團</div>
+    </div>
+
+    <div class="hero-text">
+      <span class="eyebrow">台灣 · 環島深度</span>
+      <h1 class="headline">不趕路的台灣<br>八天七夜</h1>
+    </div>
+  </div>
+
+  <div class="body">
+    <p class="subhead">從台北到花東縱谷,每天只走一段路。專屬用車、管家式照顧,讓爸媽真正放鬆地看風景。</p>
+
+    <ul class="highlights">
+      <li>全程五星飯店,行李進房不用自己提</li>
+      <li>15 人以內小團,不併團、不趕行程</li>
+      <li>專屬領隊隨行,全程中文照顧</li>
+      <li>日月潭日出、太魯閣峽谷、花東縱谷</li>
+    </ul>
+
+    <div class="price-card">
+      <div>
+        <div class="price-label">每人</div>
+        <div class="price-value">$3,280<span class="unit"> 起</span></div>
+        <div class="price-note">雙人房價,含機場接送與全程用餐</div>
+      </div>
+      <div class="departure">
+        <div class="departure-label">出發日</div>
+        <div class="departure-value">2026 / 10 / 18</div>
+        <div class="seats">尚餘 6 位</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="footer">
+    <div class="contact-rows">
+      <div class="contact-row"><span class="k">電話</span>+1 (510) 634-2307</div>
+      <div class="contact-row"><span class="k">微信 / LINE</span>packgo</div>
+    </div>
+    <div class="legal">
+      <strong>Pack &amp; Go, LLC</strong>
+      CST #2166984-40<br>
+      packgoplay.com
+    </div>
+  </div>
+
+</div>
+
+<script>
+/* 自動配適:文案長度每次都不一樣,靠人眼盯版面遲早會出事。
+   判定方式很直接 — 頁尾底邊如果掉出畫布,就是溢出。
+   先按比例縮 --u(整體字級一起縮,版面比例不變),縮到 0.82 還塞不下就畫紅條。 */
+(function autoFit() {
+  var root = document.documentElement;
+  var poster = document.querySelector('.poster');
+  var footer = document.querySelector('.footer');
+  if (!poster || !footer) return;
+
+  var posterH = poster.getBoundingClientRect().height;
+  var baseU = parseFloat(getComputedStyle(root).getPropertyValue('--poster-w')) / 1080;
+
+  function fits() {
+    return footer.getBoundingClientRect().bottom <= posterH + 0.5;
+  }
+
+  var k = 1;
+  var MIN_K = 0.82;
+  while (!fits() && k > MIN_K) {
+    k -= 0.02;
+    root.style.setProperty('--u', (baseU * k) + 'px');
+  }
+
+  if (!fits()) {
+    var warn = document.createElement('div');
+    warn.className = 'overflow-warning';
+    warn.textContent = '版面溢出:內容過長,請刪減賣點或縮短主標後重出';
+    poster.appendChild(warn);
+    return;
+  }
+
+  if (k < 1) {
+    // 留痕給 render.mjs 判讀,也方便人工回查這張是縮過的
+    document.title = document.title + ' [autofit=' + k.toFixed(2) + ']';
+  }
+})();
+</script>
+</body>
+</html>
