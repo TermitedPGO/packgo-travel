@@ -20,12 +20,20 @@ const dbExecuteMock = vi.fn();
 const redisPingMock = vi.fn();
 const stripeBalanceRetrieveMock = vi.fn();
 const anthropicModelsListMock = vi.fn();
+const assertSchemaContractMock = vi.fn();
 
 // ../db: getDb returns an object whose .execute() runs the spy.
 vi.mock("../db", () => ({
   getDb: vi.fn(async () => ({
     execute: dbExecuteMock,
   })),
+}));
+
+// ./schemaContract: checkSchema() calls assertSchemaContract(db). Mock it so the
+// schema sub-check doesn't touch dbExecuteMock (keeps checkDb's call count
+// intact) and so we can drive ok / missing-table outcomes directly.
+vi.mock("./schemaContract", () => ({
+  assertSchemaContract: assertSchemaContractMock,
 }));
 
 // ../redis: redis.ping() runs the spy.
@@ -97,9 +105,15 @@ describe("server/_core/healthCheck", () => {
     redisPingMock.mockResolvedValue("PONG");
     stripeBalanceRetrieveMock.mockResolvedValue({ available: [] });
     anthropicModelsListMock.mockResolvedValue({ data: [] });
+    assertSchemaContractMock.mockResolvedValue({
+      ok: true,
+      missing: [],
+      presentCount: 16,
+      checkedCount: 16,
+    });
   });
 
-  it("(case 1) happy path — all 4 sub-checks ok → overall: ok", async () => {
+  it("(case 1) happy path — all 5 sub-checks ok → overall: ok", async () => {
     const result = await runHealthChecks();
 
     expect(result.overall).toBe("ok");
@@ -107,6 +121,7 @@ describe("server/_core/healthCheck", () => {
     expect(result.checks.redis.status).toBe("ok");
     expect(result.checks.stripe.status).toBe("ok");
     expect(result.checks.llm.status).toBe("ok");
+    expect(result.checks.schema.status).toBe("ok");
 
     // Each sub-check should have a non-negative latency (>=0 covers 0ms
     // microbenchmarks too).
@@ -114,6 +129,7 @@ describe("server/_core/healthCheck", () => {
     expect(result.checks.redis.latencyMs).toBeGreaterThanOrEqual(0);
     expect(result.checks.stripe.latencyMs).toBeGreaterThanOrEqual(0);
     expect(result.checks.llm.latencyMs).toBeGreaterThanOrEqual(0);
+    expect(result.checks.schema.latencyMs).toBeGreaterThanOrEqual(0);
 
     // Real calls happened
     expect(dbExecuteMock).toHaveBeenCalledTimes(1);
@@ -136,11 +152,12 @@ describe("server/_core/healthCheck", () => {
     expect(result.checks.llm.status).toBe("ok");
   });
 
-  it("(case 3) all 4 fail → overall: down", async () => {
+  it("(case 3) all 5 fail → overall: down", async () => {
     dbExecuteMock.mockRejectedValueOnce(new Error("db dead"));
     redisPingMock.mockRejectedValueOnce(new Error("redis dead"));
     stripeBalanceRetrieveMock.mockRejectedValueOnce(new Error("stripe dead"));
     anthropicModelsListMock.mockRejectedValueOnce(new Error("anthropic dead"));
+    assertSchemaContractMock.mockRejectedValueOnce(new Error("schema query dead"));
 
     const result = await runHealthChecks();
 
@@ -149,10 +166,34 @@ describe("server/_core/healthCheck", () => {
     expect(result.checks.redis.status).toBe("fail");
     expect(result.checks.stripe.status).toBe("fail");
     expect(result.checks.llm.status).toBe("fail");
+    expect(result.checks.schema.status).toBe("fail");
     expect(result.checks.db.error).toContain("db dead");
     expect(result.checks.redis.error).toContain("redis dead");
     expect(result.checks.stripe.error).toContain("stripe dead");
     expect(result.checks.llm.error).toContain("anthropic dead");
+    expect(result.checks.schema.error).toContain("schema query dead");
+  });
+
+  it("(case 6) schema contract breach — required table missing → degraded, schema.status: fail", async () => {
+    // DB reachable, but a required table is gone (2026-06-17 tours-wipe pattern).
+    assertSchemaContractMock.mockResolvedValueOnce({
+      ok: false,
+      missing: ["tours", "bookings"],
+      presentCount: 14,
+      checkedCount: 16,
+    });
+
+    const result = await runHealthChecks();
+
+    expect(result.overall).toBe("degraded");
+    expect(result.checks.schema.status).toBe("fail");
+    expect(result.checks.schema.error).toContain("tours");
+    expect(result.checks.schema.error).toContain("bookings");
+    // the other four dependencies are still healthy
+    expect(result.checks.db.status).toBe("ok");
+    expect(result.checks.redis.status).toBe("ok");
+    expect(result.checks.stripe.status).toBe("ok");
+    expect(result.checks.llm.status).toBe("ok");
   });
 
   it("(case 4) Stripe cache — 2 calls within 5 min → only 1 real Stripe call", async () => {

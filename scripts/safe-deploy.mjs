@@ -704,7 +704,11 @@ if (invokedDirectly) {
   runGuard(makeRealDeps(), { dryRun })
     .then((code) => process.exit(code))
     .catch((e) => {
-      console.error("safe-deploy crashed:", e);
+      // 只印訊息首行與 stack,不印整個 error 物件:execSync error 會把子行程的
+      // stdout/stderr buffer 掛成 own 屬性,Node 的 URL error 會掛 `input`(完整
+      // 連線字串),console.error(e) 會把這些一起吐進終端與 CI 日誌。
+      console.error("safe-deploy crashed:", short(e));
+      if (e && e.stack) console.error(e.stack);
       process.exit(1);
     });
 }
